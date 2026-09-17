@@ -242,6 +242,29 @@
   .goal-add{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
   .goal-add input{flex:1 1 110px;text-align:right;font-family:var(--data);font-size:13px;padding:7px 9px;border:1px solid var(--rule);border-radius:4px;background:var(--bone);min-width:0}
   .goal-add button{flex:none}
+  .goalB{padding:15px 16px;margin-bottom:12px}
+  .gb-top{display:flex;align-items:center;gap:8px}
+  .gb-nm{flex:1;font-family:var(--display);font-size:15px;font-weight:600;border:1px solid transparent;border-radius:5px;padding:4px 6px;background:transparent;color:var(--ink);min-width:0}
+  .gb-nm:hover{border-color:var(--rule)} .gb-nm:focus{outline:2px solid var(--moss);outline-offset:1px;background:#fff}
+  .gb-del{flex:none;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer;padding:3px 7px;border-radius:4px}
+  .gb-del:hover{color:var(--brick);background:var(--brick-soft)}
+  .gb-nota{font-size:11.5px;color:var(--ink-soft);margin:2px 4px 0}
+  .gb-boxes{display:flex;gap:10px;margin:12px 0 10px}
+  .gb-box{flex:1;background:var(--bone);border-radius:8px;padding:10px 12px}
+  .gb-k{font-size:11.5px;color:var(--ink-soft);margin-bottom:2px}
+  .gb-v{font-family:var(--data);font-size:20px;font-weight:600;letter-spacing:-.02em}
+  .gb-bar{height:6px;background:#E9EBE4;border-radius:3px;overflow:hidden;margin-bottom:7px}
+  .gb-bar div{height:100%;background:var(--moss);border-radius:3px}
+  .gb-nums{display:flex;justify-content:space-between;font-family:var(--data);font-size:12px;color:var(--ink-soft)}
+  .gb-nums b{color:var(--ink)}
+  .gb-edit{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .gb-edit label{font-size:11px;font-weight:500;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px}
+  .gb-edit input{font-family:var(--data);font-size:13px;font-weight:600;padding:7px 8px;border:1px solid var(--rule);border-radius:5px;background:var(--bone);color:var(--ink);text-align:right}
+  .gb-edit input:focus{outline:2px solid var(--moss);outline-offset:1px;background:#fff}
+  .gb-add{display:flex;gap:8px;margin-top:11px}
+  .gb-add .gb-inp{flex:1;text-align:right;font-family:var(--data);font-size:13px;padding:8px 10px;border:1px solid var(--rule);border-radius:5px;background:var(--bone);color:var(--ink);min-width:0}
+  .gb-add .gb-inp:focus{outline:2px solid var(--moss);outline-offset:1px;background:#fff}
+  .gb-add .gb-sumar{flex:none}
 
   /* ---------- gráficos ---------- */
   .chart-wrap{display:flex;gap:20px;align-items:center;padding:18px 16px;flex-wrap:wrap;justify-content:center}
@@ -472,7 +495,7 @@
   <!-- ============ AHORRO ============ -->
   <div class="panel" id="p-ahorro" hidden>
     <h2>Metas de ahorro</h2>
-    <p class="sub-t">Moviendo el aporte mensual ves en qué mes llegás. Si preferís fijar la fecha, cambiala y te dice cuánto tenés que poner por mes.</p>
+    <p class="sub-t">Cada meta te dice cuánto te falta y cuánto poner por mes para llegar a la fecha. Editá el nombre, el objetivo y la fecha; sumá lo que vayas apartando.</p>
     <div id="ahorroList"></div>
 
     <div class="card" style="margin-top:14px">
@@ -1490,45 +1513,37 @@
       var meses = g.aporte>0 ? Math.ceil(falta/g.aporte) : 0;
       var necesario = Math.ceil(falta/mesesEntre(hoyISO,g.fecha)/5000)*5000;
 
-      var c=document.createElement('div'); c.className='card goal';
+      var porMes = falta<=0 ? 0 : Math.ceil(falta/mesesEntre(hoyISO,g.fecha)/5000)*5000;
+      var c=document.createElement('div'); c.className='card goalB';
       c.innerHTML=
-        '<div class="goal-top"><span class="goal-nm">'+g.nm+'</span><span class="goal-pct">'+pct.toFixed(0)+'%</span></div>'+
-        (g.nota?'<div class="goal-nota">'+g.nota+'</div>':'')+
-        '<div class="goal-bar"><div style="width:'+pct+'%"></div></div>'+
-        '<div class="goal-nums"><span>Llevás <b>'+gs(g.guardado)+'</b></span><span>Falta <b>'+gs(falta)+'</b> de '+gs(g.obj)+'</span></div>'+
-        '<div class="goal-ctl">'+
-          '<label>Aporte mensual</label>'+
-          '<div class="goal-val">'+gs(g.aporte)+'</div>'+
-          '<input type="range" min="0" max="1500000" step="25000" value="'+g.aporte+'" aria-label="Aporte mensual">'+
-          '<div class="goal-eta">'+
-            (falta<=0 ? '<b>Meta cumplida.</b>'
-             : g.aporte<=0 ? 'Sin aporte no hay fecha. Para llegar al plazo de abajo necesitás <b>'+gs(necesario)+'</b> por mes.'
-             : 'A este ritmo llegás en <b>'+mesLargo(meses)+'</b>, en '+meses+(meses===1?' mes.':' meses.'))+
-          '</div>'+
-          '<div class="goal-row"><label for="f-'+g.id+'">¿Para cuándo la querés?</label>'+
-            '<input class="date" id="f-'+g.id+'" type="date" value="'+g.fecha+'"></div>'+
-          '<div class="goal-row"><label>Para esa fecha, por mes</label>'+
-            '<div class="num" style="text-align:right;font-weight:600">'+(falta<=0?'—':gs(necesario))+'</div></div>'+
-          '<div class="goal-add">'+
-            '<input type="text" inputmode="numeric" placeholder="Aporté..." aria-label="Monto aportado">'+
-            '<button class="ghost">Sumar</button>'+
-            '<button class="ghost danger" style="padding:8px 11px" aria-label="Borrar meta">×</button>'+
-          '</div>'+
+        '<div class="gb-top">'+
+          '<input class="gb-nm" type="text" value="'+g.nm.replace(/"/g,'&quot;')+'" aria-label="Nombre de la meta">'+
+          '<button class="gb-del" aria-label="Borrar meta">×</button>'+
+        '</div>'+
+        (g.nota?'<div class="gb-nota">'+g.nota+'</div>':'')+
+        '<div class="gb-boxes">'+
+          '<div class="gb-box"><div class="gb-k">Te falta</div><div class="gb-v num">'+(falta<=0?'¡Listo!':gs(falta))+'</div></div>'+
+          '<div class="gb-box"><div class="gb-k">Por mes</div><div class="gb-v num">'+(falta<=0?'—':gs(porMes))+'</div></div>'+
+        '</div>'+
+        '<div class="gb-bar"><div style="width:'+pct+'%"></div></div>'+
+        '<div class="gb-nums"><span>Llevás <b>'+gs(g.guardado)+'</b></span><span>de '+gs(g.obj)+' ('+pct.toFixed(0)+'%)</span></div>'+
+        '<div class="gb-edit">'+
+          '<label>Objetivo<input class="gb-obj" type="text" inputmode="numeric" value="'+fmt.format(g.obj)+'"></label>'+
+          '<label>Para cuándo<input class="gb-fecha date" type="date" value="'+g.fecha+'"></label>'+
+        '</div>'+
+        '<div class="gb-add">'+
+          '<input class="gb-inp" type="text" inputmode="numeric" placeholder="Aporté...">'+
+          '<button class="gb-sumar">Sumar</button>'+
         '</div>';
 
-      var rango=c.querySelector('input[type=range]');
-      rango.addEventListener('input', function(){
-        g.aporte=+rango.value;
-        c.querySelector('.goal-val').textContent=gs(g.aporte);
-      });
-      rango.addEventListener('change', function(){ renderAll(); guardar(); });
-
-      c.querySelector('.date').addEventListener('change', function(e){
-        g.fecha=e.target.value; renderAll(); guardar();
-      });
-
-      var bts=c.querySelectorAll('.goal-add button');
-      var inp=c.querySelector('.goal-add input');
+      // nombre editable
+      c.querySelector('.gb-nm').addEventListener('change', function(e){ g.nm=e.target.value.trim()||'Meta'; renderAll(); guardar(); });
+      // objetivo editable
+      c.querySelector('.gb-obj').addEventListener('change', function(e){ g.obj=pn(e.target.value); renderAll(); guardar(); });
+      // fecha editable
+      c.querySelector('.gb-fecha').addEventListener('change', function(e){ g.fecha=e.target.value; renderAll(); guardar(); });
+      // sumar aporte
+      var inp=c.querySelector('.gb-inp');
       function sumar(){
         var v=pn(inp.value); if(v<=0){ inp.focus(); return; }
         g.guardado+=v; st.saldo=Math.max(0, st.saldo-v);
@@ -1537,9 +1552,10 @@
         inp.value=''; renderAll(); guardar();
         setStatus('Aporte registrado.');
       }
-      bts[0].addEventListener('click', sumar);
+      c.querySelector('.gb-sumar').addEventListener('click', sumar);
       inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); sumar(); } });
-      bts[1].addEventListener('click', function(){
+      // borrar meta
+      c.querySelector('.gb-del').addEventListener('click', function(){
         st.ahorros=st.ahorros.filter(function(x){return x!==g;}); renderAll(); guardar();
       });
 
@@ -1551,15 +1567,11 @@
     }
 
     var v=el('ahorroVerdict');
-    var sobra = ingreso() - cuotasFijas() - st.aporte - totalMetas();
-    v.className='card verdict '+(totAporte<=sobra?'ok':'bad');
-    v.innerHTML='<h3>'+(totAporte<=sobra?'Los aportes entran en el presupuesto':'Los aportes no entran')+'</h3>'+
-      '<p>Estás apartando <span class="big-inline">'+gs(totAporte)+'</span> por mes entre todas las metas, y te sobran '+gs(Math.max(0,sobra))+' después de cuotas, aporte a tarjetas y gastos.</p>'+
-      '<p>'+(totAporte>sobra
-        ? 'Para sostenerlo tendrías que bajar el aporte a tarjetas o recortar alguna meta de gasto. Ojo: mientras las tarjetas sigan abiertas, cada guaraní que va a ahorro es uno que no cancela deuda al 27% anual.'
-        : totAporte===0
-        ? 'Todavía no asignaste nada. Con las tarjetas abiertas eso es defendible: cancelarlas rinde 27% garantizado. Pero un fondo mínimo evita que el próximo imprevisto vuelva a una tarjeta.'
-        : 'Llevás '+gs(totGuard)+' acumulados de '+gs(totObj)+' entre todas las metas.')+'</p>';
+    var faltaTot = Math.max(0, totObj-totGuard);
+    v.className='card verdict ok';
+    v.innerHTML='<h3>Tus metas de ahorro</h3>'+
+      '<p>Llevás <span class="big-inline">'+gs(totGuard)+'</span> acumulados de '+gs(totObj)+' entre todas las metas. Te falta '+gs(faltaTot)+'.</p>'+
+      '<p>Cada aporte que sumás se descuenta de tu saldo y queda guardado acá. Mientras tengas tarjetas caras abiertas, pensá si ese dinero no rinde más cancelando deuda primero.</p>';
   }
 
   function renderObjetivos(){
