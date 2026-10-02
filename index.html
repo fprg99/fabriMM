@@ -2119,10 +2119,11 @@
         // pago fijo cumplido: vuelve a quedar pendiente el mes que viene
         t.hecho=false; t.f=sumaMeses(t.f,1); t.nota=(t.nota||'').replace(/\s*Quedó impago del ciclo anterior\.?/,''); nuevos.push(t);
       } else {
-        // pago fijo NO tildado al cerrar: NO lo marcamos como impago ni lo duplicamos.
-        // Simplemente avanza al mes nuevo como pendiente (tu flujo es cobrar y después pagar,
-        // así que 'sin tildar' no significa 'atrasado').
-        t.hecho=false; t.f=sumaMeses(t.f,1); nuevos.push(t);
+        // pago fijo NO tildado al cerrar: sigue pendiente CON SU FECHA ACTUAL.
+        // No le sumamos un mes: si vence ahora (ej: cuota que cae el 2), tiene que
+        // seguir apareciendo como 'vence ahora', no corrido al mes siguiente.
+        // (Tu flujo es cobrar y después pagar: al cobrar, estos pagos recién vencen.)
+        t.hecho=false; nuevos.push(t);
       }
     });
     st.todos=nuevos;
