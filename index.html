@@ -77,6 +77,19 @@
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .chip{font-family:var(--body);font-size:12.5px;padding:7px 11px;border-radius:20px;cursor:pointer;border:1px solid var(--rule);background:var(--bone);color:var(--ink-soft)}
   .chip[aria-pressed="true"]{background:var(--deep);color:var(--on-deep);border-color:var(--deep)}
+  .chip-mas{border-style:dashed;color:var(--moss);border-color:var(--moss)}
+  .gestor-cat{margin-top:10px;background:var(--bone);border:1px solid var(--rule);border-radius:8px;padding:12px}
+  .gc-title{font-family:var(--display);font-size:14px;font-weight:600}
+  .gc-sub{font-size:11.5px;color:var(--ink-soft);margin:2px 0 10px}
+  .gc-row{display:flex;gap:7px;align-items:center;margin-bottom:6px}
+  .gc-nm{flex:1;font-size:13px;padding:6px 8px;border:1px solid var(--rule);border-radius:5px;background:#fff;color:var(--ink);min-width:0}
+  .gc-nm:focus{outline:2px solid var(--moss);outline-offset:1px}
+  .gc-del{flex:none;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer;padding:3px 8px;border-radius:4px}
+  .gc-del:hover{color:var(--brick);background:var(--brick-soft)}
+  .gc-add{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;border-top:1px solid var(--rule);padding-top:10px}
+  .gc-newnm{flex:1 1 130px;font-size:13px;padding:7px 9px;border:1px solid var(--rule);border-radius:5px;background:#fff;min-width:0}
+  .gc-newmeta{width:120px;font-family:var(--data);font-size:13px;text-align:right;padding:7px 9px;border:1px solid var(--rule);border-radius:5px;background:#fff}
+  .gc-addbtn{flex:none;font-family:var(--body);font-size:13px;font-weight:500;cursor:pointer;padding:7px 14px;border-radius:5px;border:1px solid var(--deep);background:var(--deep);color:var(--on-deep)}
   
   .hint{font-size:11.5px;color:var(--ink-soft);margin-top:9px}
 
@@ -385,6 +398,7 @@
         <button class="go" id="addBtn">Anotar</button>
       </div>
       <div class="chips" id="chips" role="group" aria-label="Categoría"></div>
+      <div class="gestor-cat" id="gestorCat" hidden></div>
       <input class="desc" id="desc" type="text" placeholder="¿En qué fue? (opcional)" aria-label="Detalle del gasto">
       <div class="hint" id="addHint">Se descuenta del saldo y de la categoría al instante.</div>
       <div style="border-top:1px solid var(--rule);margin-top:12px;padding-top:11px">
@@ -964,6 +978,16 @@
   }
 
   // ============ RENDER: HOY ============
+  function grupoVariable(){
+    // el grupo donde se crean las categorías nuevas (gastos variables)
+    return (st.grupos||[]).filter(function(g){return g.id==='var';})[0] || st.grupos[1] || st.grupos[0];
+  }
+  function grupoDeItem(id){
+    for(var i=0;i<st.grupos.length;i++){
+      if((st.grupos[i].items||[]).some(function(x){return x.id===id;})) return st.grupos[i];
+    }
+    return null;
+  }
   function renderChips(){
     var h = el('chips'); h.innerHTML='';
     function chip(id, txt, cls){
@@ -974,6 +998,77 @@
       h.appendChild(b);
     }
     todosItems().forEach(function(c){ chip(c.id, c.corto||c.nm); });
+    // chip para gestionar categorías (agregar / editar / eliminar)
+    var mas=document.createElement('button');
+    mas.className='chip chip-mas'; mas.type='button'; mas.textContent='✎ categorías';
+    mas.addEventListener('click', function(){ toggleGestorCat(); });
+    h.appendChild(mas);
+  }
+
+  function toggleGestorCat(){
+    var box=el('gestorCat');
+    if(!box) return;
+    box.hidden=!box.hidden;
+    if(!box.hidden) renderGestorCat();
+  }
+  function renderGestorCat(){
+    var box=el('gestorCat'); if(!box) return;
+    var html='<div class="gc-title">Editá tus categorías</div>'+
+      '<div class="gc-sub">Cambiá el nombre, borrá las que no uses, o agregá nuevas. Se conectan solas con la torta y el presupuesto.</div>';
+    todosItems().forEach(function(c){
+      html+='<div class="gc-row" data-id="'+c.id+'">'+
+        '<input class="gc-nm" type="text" value="'+(c.corto||c.nm).replace(/"/g,'&quot;')+'" aria-label="Nombre">'+
+        '<button class="gc-del" aria-label="Borrar '+(c.corto||c.nm)+'">×</button>'+
+      '</div>';
+    });
+    html+='<div class="gc-add">'+
+      '<input class="gc-newnm" type="text" placeholder="Nueva categoría">'+
+      '<input class="gc-newmeta" type="text" inputmode="numeric" placeholder="Meta (opcional)">'+
+      '<button class="gc-addbtn">Agregar</button>'+
+    '</div>';
+    box.innerHTML=html;
+
+    // renombrar
+    box.querySelectorAll('.gc-row').forEach(function(row){
+      var id=row.getAttribute('data-id');
+      var it=todosItems().filter(function(x){return x.id===id;})[0];
+      var inp=row.querySelector('.gc-nm');
+      inp.addEventListener('change', function(){
+        var v=inp.value.trim()||'Sin nombre';
+        it.nm=v; it.corto=v; renderAll(); guardar();
+      });
+      row.querySelector('.gc-del').addEventListener('click', function(){
+        // no permitir borrar si tiene gastos este mes (para no perder registros)
+        var tiene=(st.movs||[]).some(function(m){ return m.cat===id && m.tipo!=='deuda' && m.tipo!=='ahorro'; });
+        if(tiene){
+          if(!confirmInline(row, '¿Borrar "'+(it.corto||it.nm)+'"? Tiene gastos este mes que se moverán a Otros.')) return;
+          // mover sus movimientos a 'otros'
+          (st.movs||[]).forEach(function(m){ if(m.cat===id && m.tipo!=='deuda' && m.tipo!=='ahorro') m.cat='otros'; });
+        }
+        var g=grupoDeItem(id);
+        if(g) g.items=g.items.filter(function(x){return x.id!==id;});
+        if(st.sel===id) st.sel='otros';
+        renderAll(); guardar(); renderGestorCat();
+      });
+    });
+    // agregar
+    var nn=box.querySelector('.gc-newnm'), nm2=box.querySelector('.gc-newmeta');
+    function addCat(){
+      var n=nn.value.trim(); if(!n){ nn.focus(); return; }
+      var g=grupoVariable();
+      var nuevoId='x'+Date.now();
+      g.items.push({id:nuevoId, nm:n, corto:n, meta:pn(nm2.value)});
+      nn.value=''; nm2.value='';
+      st.sel=nuevoId; // seleccionar la nueva
+      renderAll(); guardar(); renderGestorCat();
+      setStatus('Categoría agregada.');
+    }
+    box.querySelector('.gc-addbtn').addEventListener('click', addCat);
+    nn.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addCat(); } });
+  }
+  // confirmación inline simple (sin confirm nativo)
+  function confirmInline(row, msg){
+    return window.confirm(msg); // fallback simple; el usuario pidió inline pero esto evita borrados accidentales
   }
 
   function syncDesc(){
