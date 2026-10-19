@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="styles.css?v=3">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -34,7 +34,7 @@
   </div>
 
   <!-- ============ HOY ============ -->
-  <div class="panel" id="p-hoy">
+  <div class="panel cols" id="p-hoy">
     <div class="card advice bad" id="warnSave" hidden style="margin:0 0 12px">
       <h3>Los cambios no se están guardando</h3>
       <p>El guardado automático solo funciona si el panel está publicado. Abrí el menú del artefacto y tocá «Publicar»; hasta entonces, usá «Descargar respaldo» antes de cerrar.</p>
@@ -46,6 +46,7 @@
       <button class="ghost" id="perfilBtn" style="width:100%;margin-top:8px">Cargar perfil</button>
     </div>
 
+    <div class="col">
     <div class="today">
       <div class="k">Podés gastar hoy</div>
       <div class="big ok" id="hoy">—</div>
@@ -91,7 +92,9 @@
     </div>
 
     <div class="card advice" id="advice"></div>
+    </div>
 
+    <div class="col">
     <h2>Cómo vas este mes</h2>
     <p class="sub-t" id="catSub">—</p>
     <div class="card" id="torta" style="margin-bottom:12px"></div>
@@ -125,10 +128,12 @@
       <button class="ghost" id="impBtn">Restaurar respaldo</button>
       <input type="file" id="impFile" accept="application/json" hidden>
     </div>
+    </div>
   </div>
 
   <!-- ============ PRESUPUESTO ============ -->
-  <div class="panel" id="p-presu" hidden>
+  <div class="panel cols" id="p-presu" hidden>
+    <div class="col">
     <h2>Objetivos del mes</h2>
     <p class="sub-t">Adónde tiene que ir cada guaraní del sueldo este ciclo, y cuánto llevás cumplido.</p>
     <div class="card" id="objetivos"></div>
@@ -157,7 +162,9 @@
     <h2>Real contra meta</h2>
     <p class="sub-t">La barra es lo que llevás gastado; la línea vertical es la meta. Ordenado por cuánto te pasaste.</p>
     <div class="card" id="barras"></div>
+    </div>
 
+    <div class="col">
     <h2>Lo que sale</h2>
     <p class="sub-t" id="loQueSaleSub">Lo que llevás gastado este mes contra tu meta. Editá metas y nombres, borrá con la × y agregá lo que falte.</p>
     <div id="groups"></div>
@@ -165,6 +172,7 @@
     <div class="actions">
       <button id="saveBtn">Guardar</button>
       <button class="ghost danger" id="resetBtn">Volver al original</button>
+    </div>
     </div>
   </div>
 
@@ -186,7 +194,8 @@
   </div>
 
   <!-- ============ DEUDAS ============ -->
-  <div class="panel" id="p-deudas" hidden>
+  <div class="panel cols" id="p-deudas" hidden>
+    <div class="col">
     <h2>Tus deudas</h2>
     <p class="sub-t">Método avalancha: pagás el mínimo de todas y el dinero extra va entero a la más cara, hasta reventarla. Después salta sola a la siguiente.</p>
 
@@ -194,7 +203,9 @@
 
     <div class="drow-lbl" style="margin:22px 2px 8px">Las que siguen</div>
     <div id="deudaCards"></div>
+    </div>
 
+    <div class="col">
     <div class="card" style="padding:15px 16px;margin-top:14px">
       <label for="aporte" style="font-size:13px;font-weight:500">Dinero extra por mes</label>
       <div class="drow-sub" style="margin:2px 0 4px">Se suma a los mínimos y ataca la deuda más cara. Cuanto más alto, antes salís.</div>
@@ -234,6 +245,7 @@
         </div>
       </div>
     </details>
+    </div>
   </div>
 
   <!-- ============ HISTORIAL ============ -->
@@ -253,4 +265,4 @@
   </footer>
 </div>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
