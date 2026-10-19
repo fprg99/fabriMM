@@ -42,7 +42,7 @@
 
     <div class="card advice warn" id="warnPerfil" hidden style="margin:0 0 12px">
       <h3>Falta tu perfil privado</h3>
-      <p>Los nombres, tasas y cuotas de tus deudas ya no viven en el código de la app. Cargá tu archivo <b>perfil-my-money.json</b> una sola vez y queda guardado en este dispositivo.</p>
+      <p>Los nombres, tasas y cuotas de tus deudas no viven en el código de la app. Cargá tu archivo <b>perfil-my-money.json</b> una sola vez, o agregá tus deudas a mano en la pestaña Deudas → «Editar tus deudas». Queda guardado en este dispositivo.</p>
       <button class="ghost" id="perfilBtn" style="width:100%;margin-top:8px">Cargar perfil</button>
     </div>
 
@@ -201,8 +201,7 @@
       <div class="slider-val num" id="aporteVal">—</div>
       <input type="range" id="aporte" min="0" max="4000000" step="25000">
       <div class="ends"><span>0</span><span>4.000.000</span></div>
-      <label class="toggle" style="margin-top:12px"><input type="checkbox" id="recalc"><span>El banco recalcula intereses si precancelo <span id="recalcNm">el préstamo</span> — preguntá antes de marcarlo</span></label>
-      <label class="toggle" style="margin-top:8px"><input type="checkbox" id="puenteChk"><span>Apartar <span id="puenteMontoTxt">un monto fijo</span>/mes por dos meses para el puente del retiro único</span></label>
+      <label class="toggle" style="margin-top:12px"><input type="checkbox" id="puenteChk"><span>Apartar <span id="puenteMontoTxt">un monto fijo</span>/mes por dos meses para el puente del retiro único</span></label>
     </div>
 
     <div class="card verdict" id="deudaVerdict" style="margin-top:14px"></div>
@@ -212,12 +211,28 @@
       <p class="sub-t" style="margin-top:8px">Cuánto va a cada deuda cada mes. Fijate cómo el extra salta de una a otra cuando se libera.</p>
       <div class="card scroll">
         <table>
-          <thead><tr id="schedHead"><th>Mes</th><th>Tarjeta 2</th><th>Tarjeta 3</th><th>Préstamo 1</th><th>Préstamo 2</th><th>Total</th></tr></thead>
+          <thead><tr id="schedHead"><th>Mes</th><th>Total</th></tr></thead>
           <tbody id="schedBody"></tbody>
         </table>
       </div>
       <p class="sub-t" style="margin-top:9px" id="schedNote"></p>
       <div style="margin-top:12px" id="timeline"></div>
+    </details>
+
+    <details id="editDeudas" style="margin-top:18px">
+      <summary>Editar tus deudas</summary>
+      <p class="sub-t" style="margin-top:8px">Agregá, cambiá o borrá tarjetas y préstamos. Las tasas van en % anual. Todo queda guardado solo en este dispositivo.</p>
+      <div id="deudaEditor"></div>
+      <div class="card" style="margin-top:12px">
+        <div class="addbar" style="border-top:none">
+          <input class="nn" id="dNm" type="text" placeholder="Nueva deuda (ej: Tarjeta Visa)" aria-label="Nombre de la deuda nueva">
+          <select class="na" id="dTipo" style="width:120px;font-family:var(--body);text-align:left" aria-label="Tipo de deuda">
+            <option value="tarjeta">Tarjeta</option>
+            <option value="prestamo">Préstamo</option>
+          </select>
+          <button class="ghost" id="dAdd">Agregar</button>
+        </div>
+      </div>
     </details>
   </div>
 

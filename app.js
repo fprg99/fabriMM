@@ -10,7 +10,8 @@
   var LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   function mesRef(){ var d=new Date(); return LARGO[d.getMonth()]; }
   function mesRefCap(){ var m=mesRef(); return m.charAt(0).toUpperCase()+m.slice(1); }
-  var MES0 = 7, ANIO0 = 2026;
+  // el mes 0 de la simulación es el mes en curso
+  var MES0 = new Date().getMonth(), ANIO0 = new Date().getFullYear();
 
   function nombreMes(off, largo){
     var i = (MES0+off)%12, a = ANIO0 + Math.floor((MES0+off)/12);
@@ -18,27 +19,24 @@
   }
 
   // ============ ESTADO ============
-  // Perfil neutro. Tus datos reales (nombres de deudas, tasas, cuotas, mínimos) no viven en
-  // el código: se cargan una vez desde tu archivo de perfil privado y quedan en este dispositivo.
+  // Perfil neutro. Tus datos reales (deudas, tasas, cuotas, mínimos) no viven en el código:
+  // se cargan desde tu archivo de perfil privado o se cargan a mano, y quedan en este dispositivo.
+  // Cada deuda del perfil:
+  //   tarjeta:  {id, nm, corto, tipo:'tarjeta',  tasa, cargo, minimo, saldoInicial, detalle, patrones}
+  //   préstamo: {id, nm, corto, tipo:'prestamo', cuota, total, tasa, capital, recalc, detalle, patrones}
+  // El saldo vive aparte, en st.deudas[id]: guaraníes en tarjetas, cuotas que faltan en préstamos.
   var PERFIL_DEMO = {
     demo:true,
     cuenta:'tu cuenta',
     cobroMonto:0,
     puenteMonto:0,
-    deudas:[
-      {id:'gnb',    nm:'Tarjeta 1',  corto:'Tarjeta 1',  tipo:'tarjeta',  saldoInicial:0, tasa:0, cargo:0, minimo:0, patrones:[], detalle:'Tarjeta'},
-      {id:'conti',  nm:'Tarjeta 2',  corto:'Tarjeta 2',  tipo:'tarjeta',  saldoInicial:0, tasa:0, cargo:0, minimo:0, patrones:[], detalle:'Tarjeta'},
-      {id:'ueno',   nm:'Tarjeta 3',  corto:'Tarjeta 3',  tipo:'tarjeta',  saldoInicial:0, tasa:0, cargo:0, minimo:0, patrones:[], detalle:'Tarjeta'},
-      {id:'lconti', nm:'Préstamo 1', corto:'Préstamo 1', tipo:'prestamo', cuota:0, total:0, patrones:[], detalle:'Préstamo · cuota fija'},
-      {id:'lueno',  nm:'Préstamo 2', corto:'Préstamo 2', tipo:'prestamo', cuota:0, total:0, tasa:0, capital:0, patrones:[], detalle:'Préstamo · cuota fija'}
-    ]
+    deudas:[]
   };
   var HOY0 = new Date().toISOString().slice(0,10);
   var BASE = {
     perfil:PERFIL_DEMO,
     ing:{usd:0, tc:7000, fee:0, retiros:1, extra:0},
-    aporte:0, recalc:false, puente:false,
-    aporteCard:{gnb:0, conti:0, ueno:0},
+    aporte:0, puente:false,
     saldo:0, cobro:'',
     ciclo:{inicio:HOY0, cobros:[]},
     ahorros:[
@@ -49,7 +47,7 @@
     sel:'delivery',
     movs:[],
     todos:[],
-    deudas:{gnb:0, conti:0, ueno:0, lconti:0, lueno:0},
+    deudas:{},
     grupos:[
       {id:'fijo', t:'Gastos fijos', n:'Salen todos los meses. No se recortan.', items:[
         {id:'gym',   nm:'Gimnasio', meta:0, corto:'Gym'},
@@ -74,37 +72,42 @@
   var clon = function(o){ if(o===undefined||o===null) return o; try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } };
   var st = clon(BASE);
 
-  // Valores que salen del perfil (se recalculan en aplicarPerfil cada vez que se renderiza)
-  var CUOTA_CONTI=0, CUOTA_UENO=0, DEUDAS_META=[], CARGOS={}, TASAS={}, MINIMOS={},
-      TAE_UENO_PREST=0, CAPITAL_UENO=0, PERFIL=PERFIL_DEMO;
+  // Perfil activo y lista de deudas (se recalculan en aplicarPerfil cada vez que se renderiza)
+  var DEUDAS_META=[], PERFIL=PERFIL_DEMO;
   function aplicarPerfil(){
-    var p = (st.perfil && Array.isArray(st.perfil.deudas) && st.perfil.deudas.length) ? st.perfil : PERFIL_DEMO;
-    // completar deudas que falten en un perfil incompleto
-    var porId={};
-    p.deudas.forEach(function(d){ porId[d.id]=d; });
-    PERFIL_DEMO.deudas.forEach(function(d){ if(!porId[d.id]){ porId[d.id]=clon(d); p.deudas.push(porId[d.id]); } });
-    PERFIL=p;
-    DEUDAS_META=p.deudas;
-    CUOTA_CONTI=porId.lconti.cuota||0; CUOTA_UENO=porId.lueno.cuota||0;
-    TAE_UENO_PREST=porId.lueno.tasa||0; CAPITAL_UENO=porId.lueno.capital||0;
-    ['gnb','conti','ueno'].forEach(function(id){
-      CARGOS[id]=porId[id].cargo||0; TASAS[id]=porId[id].tasa||0; MINIMOS[id]=porId[id].minimo||0;
-    });
+    if(!st.perfil || typeof st.perfil!=='object') st.perfil=clon(PERFIL_DEMO);
+    if(!Array.isArray(st.perfil.deudas)) st.perfil.deudas=[];
+    if(!st.deudas || typeof st.deudas!=='object') st.deudas={};
+    // guardados viejos tenían un único "recalcula intereses" global para el préstamo con tasa
+    if(st.recalc!==undefined){
+      if(st.recalc) st.perfil.deudas.forEach(function(m){ if(m.tipo==='prestamo' && m.capital>0 && m.recalc===undefined) m.recalc=true; });
+      delete st.recalc;
+    }
+    delete st.aporteCard; // campo viejo sin uso
+    PERFIL=st.perfil;
+    DEUDAS_META=PERFIL.deudas;
   }
+  function deudaPorId(id){ return DEUDAS_META.filter(function(x){return x.id===id;})[0]; }
+  function esPrestamo(m){ return m.tipo==='prestamo'; }
+  function tarjetas(){ return DEUDAS_META.filter(function(m){ return !esPrestamo(m); }); }
+  function prestamos(){ return DEUDAS_META.filter(esPrestamo); }
   function nombreDeuda(id){
-    var d=DEUDAS_META.filter(function(x){return x.id===id;})[0];
-    return d?d.nm:id;
+    var d=deudaPorId(id);
+    return d?d.nm:'Deuda borrada';
   }
+  // saldo en guaraníes (en préstamos: cuotas que faltan × cuota)
+  function saldoDe(m){ var v=st.deudas[m.id]||0; return esPrestamo(m) ? v*(m.cuota||0) : v; }
+  function deudaTotal(){ return DEUDAS_META.reduce(function(s,m){ return s+saldoDe(m); },0); }
   // aplica un pago sobre el saldo de la deuda
   function aplicarPagoDeuda(id, monto, revertir){
-    var meta=DEUDAS_META.filter(function(x){return x.id===id;})[0];
+    var meta=deudaPorId(id);
     if(!meta) return;
     var sg = revertir ? -1 : 1;
     if(meta.tipo==='prestamo'){
       var n=meta.cuota>0 ? Math.max(1, Math.round(monto/meta.cuota)) : 1;
-      st.deudas[id]=Math.max(0, st.deudas[id] - sg*n);
+      st.deudas[id]=Math.max(0, (st.deudas[id]||0) - sg*n);
     } else {
-      st.deudas[id]=Math.max(0, st.deudas[id] - sg*monto);
+      st.deudas[id]=Math.max(0, (st.deudas[id]||0) - sg*monto);
     }
   }
   aplicarPerfil();
@@ -112,7 +115,9 @@
   function defaultCobro(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+1); return d.toISOString().slice(0,10); }
   function todosItems(){ return st.grupos.reduce(function(a,g){ return a.concat(g.items); },[]); }
   function totalMetas(){ return todosItems().reduce(function(s,i){return s+i.meta;},0); }
-  function cuotasFijas(){ return (st.deudas.lconti>0?CUOTA_CONTI:0) + (st.deudas.lueno>0?CUOTA_UENO:0); }
+  function cuotasFijas(){
+    return prestamos().reduce(function(s,m){ return s + ((st.deudas[m.id]||0)>0 ? (m.cuota||0) : 0); },0);
+  }
   function ingreso(){
     var i = st.ing;
     return Math.max(0, (i.usd - i.fee*Math.max(1,i.retiros)) * i.tc + i.extra);
@@ -191,7 +196,7 @@
       }
     });
     // 5b) inferir la deuda de pendientes de pago de tarjeta/préstamo por su nombre
-    //     (ej: 'Pago tarjeta conti' sin deuda asignada -> deuda:'conti')
+    //     (ej: 'Pago tarjeta X' sin deuda asignada -> la deuda X)
     //     Los patrones de cada deuda vienen del perfil privado.
     var NOMBRE_A_DEUDA = [];
     ((d.perfil && d.perfil.deudas) || DEUDAS_META).forEach(function(m){
@@ -319,14 +324,18 @@
   // ============ SIMULACIÓN ============
   function simular(){
     // costo real anual de cada tarjeta = tasa + cargos fijos sobre el saldo. Define el orden de avalancha.
-    var cards=[
-      {id:'gnb',   c:nombreDeuda('gnb'),   s:st.deudas.gnb,   i:Math.pow(1+TASAS.gnb,1/12)-1,   cg:CARGOS.gnb,   min:MINIMOS.gnb,   fin:null},
-      {id:'conti', c:nombreDeuda('conti'), s:st.deudas.conti, i:Math.pow(1+TASAS.conti,1/12)-1, cg:CARGOS.conti, min:MINIMOS.conti, fin:null},
-      {id:'ueno',  c:nombreDeuda('ueno'),  s:st.deudas.ueno,  i:Math.pow(1+TASAS.ueno,1/12)-1,  cg:CARGOS.ueno,  min:MINIMOS.ueno,  fin:null}
-    ];
-    var lc={id:'lconti', c:nombreDeuda('lconti'), r:st.deudas.lconti, fin:null};
-    var lu={id:'lueno',  c:nombreDeuda('lueno'), r:st.deudas.lueno, fin:null,
-            s: st.recalc ? CAPITAL_UENO : st.deudas.lueno*CUOTA_UENO, i:Math.pow(1+TAE_UENO_PREST,1/12)-1};
+    var cards=tarjetas().map(function(m){
+      return {id:m.id, c:m.nm, s:st.deudas[m.id]||0, i:Math.pow(1+(m.tasa||0),1/12)-1,
+              cg:m.cargo||0, min:m.minimo||0, fin:null};
+    });
+    // préstamos: cuota fija. Los que tienen tasa aceptan adelantos con lo que sobre del aporte;
+    // si el banco recalcula intereses al precancelar, el saldo parte del capital y genera interés.
+    var loans=prestamos().map(function(m){
+      var r=st.deudas[m.id]||0, cuota=m.cuota||0;
+      return {id:m.id, c:m.nm, r:r, cuota:cuota, fin:null, recalc:!!m.recalc,
+              prepago:(m.tasa||0)>0 && cuota>0,
+              s: m.recalc ? (m.capital||0) : r*cuota, i:Math.pow(1+(m.tasa||0),1/12)-1};
+    });
 
     var cal=[], interes=0, libre=0, MAX=60, m;
     var ordenInicial=null;
@@ -365,17 +374,17 @@
       });
 
       // préstamos: cuota fija
-      if(lc.r>0){ f.p.lconti=CUOTA_CONTI; lc.r--; if(lc.r===0){ lc.fin=m; libre+=CUOTA_CONTI; f.cierra.push(lc.c);} }
-      if(lu.r>0){
-        f.p.lueno=CUOTA_UENO;
-        if(st.recalc){ var iu=lu.s*lu.i; interes+=iu; lu.s+=iu-CUOTA_UENO; } else { lu.s-=CUOTA_UENO; }
-        lu.r--;
-        if(pool>0 && lu.s>0){ var pre=Math.min(pool,lu.s); lu.s-=pre; pool-=pre; f.p.lueno+=pre; lu.r=Math.max(0,Math.ceil(lu.s/CUOTA_UENO)); }
-        if(lu.s<=1||lu.r===0){ lu.s=0; lu.r=0; if(lu.fin===null){ lu.fin=m; libre+=CUOTA_UENO; f.cierra.push(lu.c);} }
-      }
+      loans.forEach(function(l){
+        if(l.r<=0) return;
+        f.p[l.id]=l.cuota;
+        if(l.recalc){ var iu=l.s*l.i; interes+=iu; l.s+=iu-l.cuota; } else { l.s-=l.cuota; }
+        l.r--;
+        if(l.prepago && pool>0 && l.s>0){ var pre=Math.min(pool,l.s); l.s-=pre; pool-=pre; f.p[l.id]+=pre; l.r=Math.max(0,Math.ceil(l.s/l.cuota)); }
+        if(l.s<=1||l.r===0){ l.s=0; l.r=0; if(l.fin===null){ l.fin=m; libre+=l.cuota; f.cierra.push(l.c);} }
+      });
 
       cal.push(f);
-      if(!cards.some(function(c){return c.s>0;}) && lc.r<=0 && lu.r<=0) break;
+      if(!cards.some(function(c){return c.s>0;}) && !loans.some(function(l){return l.r>0;})) break;
     }
 
     return {
@@ -387,7 +396,7 @@
       })(),
       objetivoActual: cal.length?cal[0].objetivo:null,
       filas: cards.map(function(c){return {id:c.id,c:c.c,t:'card',fin:c.fin===null?MAX:c.fin};})
-        .concat([{id:'lconti',c:lc.c,t:'loan',fin:lc.fin===null?MAX:lc.fin},{id:'lueno',c:lu.c,t:'loan',fin:lu.fin===null?MAX:lu.fin}])
+        .concat(loans.map(function(l){return {id:l.id,c:l.c,t:'loan',fin:l.fin===null?MAX:l.fin};}))
     };
   }
 
@@ -778,9 +787,10 @@
         '<p>Marcá la casilla del puente en la pestaña de deudas para ver cuánto atrasa el plan armarlo ya.</p>';
 
     var dh=el('deudaRows'); dh.innerHTML='';
-    [{nm:'Cuota '+nombreDeuda('lconti'), n:st.deudas.lconti+' cuotas', v:st.deudas.lconti>0?CUOTA_CONTI:0},
-     {nm:'Cuota '+nombreDeuda('lueno'), n:st.deudas.lueno+' cuotas', v:st.deudas.lueno>0?CUOTA_UENO:0},
-     {nm:'Aporte a tarjetas', n:'lo movés en Deudas', v:st.aporte}].forEach(function(d){
+    prestamos().map(function(m){
+      var r=st.deudas[m.id]||0;
+      return {nm:'Cuota '+m.nm, n:r+' cuotas', v:r>0?(m.cuota||0):0};
+    }).concat([{nm:'Aporte a tarjetas', n:'lo movés en Deudas', v:st.aporte}]).forEach(function(d){
       var r=document.createElement('div'); r.className='erow';
       r.innerHTML='<div style="padding-left:8px">'+d.nm+'<div style="font-size:11.5px;color:var(--ink-soft)">'+d.n+'</div></div>'+
         '<div class="num" style="text-align:right;font-size:13px">—</div>'+
@@ -844,7 +854,6 @@
       if(fin===undefined || fin>=60) return '—';
       return nombreMes(fin, true);
     }
-    function saldoDe(m){ return m.tipo==='prestamo' ? st.deudas[m.id]*m.cuota : st.deudas[m.id]; }
 
     // ---- FOCO: la deuda que se ataca ahora ----
     var foco=el('focoDeuda'); foco.innerHTML='';
@@ -869,7 +878,7 @@
             '<div class="foco-box"><div class="foco-k">Queda libre en</div><div class="foco-v">'+etiquetaFin(objId)+'</div></div>'+
           '</div>'+
           '<div class="drow-grid" style="margin-top:12px">'+
-            '<label>Saldo actual<input class="ff-sld" type="text" inputmode="numeric" value="'+fmt.format(st.deudas[objId])+'"></label>'+
+            '<label>Saldo actual<input class="ff-sld" type="text" inputmode="numeric" value="'+fmt.format(st.deudas[objId]||0)+'"></label>'+
             '<label>Registrar un pago<input class="ff-abo" type="text" inputmode="numeric" placeholder="0"></label>'+
           '</div>'+
           '<div class="drow-act"><button class="ghost ff-pay">Aplicar pago</button></div>'+
@@ -893,21 +902,24 @@
       });
       fabo.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); foco.querySelector('.ff-pay').click(); } });
     } else {
-      foco.innerHTML='<div class="card foco"><div class="foco-nm">Sin tarjetas activas</div>'+
-        '<div class="drow-sub" style="margin-top:4px">Ya liquidaste las tres tarjetas. Lo que sigue son las cuotas fijas de los préstamos.</div></div>';
+      foco.innerHTML = DEUDAS_META.length
+        ? '<div class="card foco"><div class="foco-nm">Sin tarjetas activas</div>'+
+          '<div class="drow-sub" style="margin-top:4px">No tenés tarjetas con saldo. Lo que sigue son las cuotas fijas de los préstamos.</div></div>'
+        : '<div class="card foco"><div class="foco-nm">Todavía no cargaste deudas</div>'+
+          '<div class="drow-sub" style="margin-top:4px">Agregá tus tarjetas y préstamos abajo, en «Editar tus deudas», o cargá tu perfil privado.</div></div>';
     }
 
     // ---- TARJETAS: todas las deudas ----
     var host=el('deudaCards'); host.innerHTML='';
     DEUDAS_META.forEach(function(m){
       if(m.id===objId) return; // ya está destacada arriba en el foco
-      var val=st.deudas[m.id], esPrest=m.tipo==='prestamo';
+      var val=st.deudas[m.id]||0, esPrest=m.tipo==='prestamo';
       var saldoGs=saldoDe(m), liquidada=val<=0;
       var esObjetivo = false;
       var pago = pagoMes[m.id]||0;
       var tot = esPrest ? m.total : m.saldoInicial;
       var pct = liquidada ? 100 : (tot>0 ? Math.min(100, Math.max(2,(1-saldoGs/tot)*100)) : 0);
-      var barBg = m.id==='conti'?'var(--bad-l)':m.id==='ueno'?'var(--warn-l)':'var(--ok-l)';
+      var barBg = esPrest ? 'var(--ok-l)' : 'var(--warn-l)';
 
       var c=document.createElement('div'); c.className='card drow'+(esObjetivo?' drow-foco':'');
       c.innerHTML=
@@ -917,7 +929,7 @@
         (liquidada?'':
           '<div class="drow-progress"><div style="width:'+pct+'%;background:'+barBg+'"></div></div>'+
           '<div class="drow-meta">'+
-            '<span>'+(esPrest?'Cuota fija':(esObjetivo?'Le pagás':'Mínimo'))+' <b class="num">'+gs(pago||(esPrest?m.cuota:m.min))+'</b>/mes</span>'+
+            '<span>'+(esPrest?'Cuota fija':(esObjetivo?'Le pagás':'Mínimo'))+' <b class="num">'+gs(pago||(esPrest?(m.cuota||0):(m.minimo||0)))+'</b>/mes</span>'+
             '<span>Libre en <b>'+etiquetaFin(m.id)+'</b></span>'+
           '</div>')+
         '<div class="drow-grid">'+
@@ -955,7 +967,6 @@
   function renderDeudas(){
     el('aporte').value=st.aporte;
     el('aporteVal').textContent='Gs. '+gs(st.aporte);
-    el('recalc').checked=st.recalc;
     el('puenteChk').checked=st.puente;
 
     var sim=simular();
@@ -976,7 +987,12 @@
     });
 
     // calendario
-    var cols=['conti','ueno','lconti','lueno'], b=el('schedBody'); b.innerHTML='';
+    // columnas: las deudas que reciben algún pago en los meses que se muestran
+    var cols=DEUDAS_META.filter(function(m){
+      return sim.cal.slice(0,10).some(function(f){ return (f.p[m.id]||0)>0; });
+    }).map(function(m){ return m.id; });
+    el('schedHead').innerHTML='<th>Mes</th>'+cols.map(function(id){ return '<th>'+(deudaPorId(id).corto||deudaPorId(id).nm)+'</th>'; }).join('')+'<th>Total</th>';
+    var b=el('schedBody'); b.innerHTML='';
     sim.cal.slice(0,10).forEach(function(f){
       var t=cols.reduce(function(s,k){return s+(f.p[k]||0);},0);
       var cel=cols.map(function(k){ var v=f.p[k]||0; return '<td'+(v?'':' style="color:var(--rule)"')+'>'+(v?gs(v):'—')+'</td>'; }).join('');
@@ -984,20 +1000,119 @@
         (f.cierra.length?'<span class="flag on">✓ '+f.cierra.join(' + ')+'</span>':'')+'</td>'+cel+'<td style="font-weight:600">'+gs(t)+'</td></tr>');
     });
     var resto=sim.cal.length-Math.min(10,sim.cal.length);
-    el('schedNote').textContent = resto>0 ? 'Faltan '+resto+' meses más, iguales al último, hasta cerrar '+nombreDeuda('lueno')+'.' : 'Ese es el calendario completo hasta deuda cero.';
+    var ultima = sim.filas.slice().sort(function(a,b){ return b.fin-a.fin; })[0];
+    el('schedNote').textContent = resto>0 ? 'Faltan '+resto+' meses más, iguales al último, hasta cerrar '+(ultima?ultima.c:'la última deuda')+'.' : 'Ese es el calendario completo hasta deuda cero.';
 
     var v=el('deudaVerdict');
     var tarjetasVivas = sim.finTar>=0;
     v.className='card verdict '+((!tarjetasVivas||sim.finTar<60)?'ok':'bad');
-    var titulo = !tarjetasVivas
+    var titulo = !DEUDAS_META.length
+      ? 'Todavía no cargaste deudas'
+      : !tarjetasVivas
       ? 'Ya no tenés tarjetas con saldo'
       : (sim.finTar>=60
           ? 'Con este aporte las tarjetas tardan más de 5 años — subilo para acelerar'
           : 'Liquidás las tarjetas en '+nombreMes(sim.finTar,true));
     v.innerHTML='<h3>'+titulo+'</h3>'+
       '<p>Pagás <span class="big-inline">'+gs(sim.interes)+'</span> de intereses y cargos en total hasta llegar a cero.</p>'+
-      '<p>'+(st.recalc?'Estás asumiendo que el banco recalcula intereses al precancelar '+nombreDeuda('lueno')+'. Confirmalo antes de contar con esa fecha.':'Sin recálculo de intereses en '+nombreDeuda('lueno')+', adelantar cuotas del préstamo no te ahorra plata: el plan solo ataca las tarjetas.')+'</p>';
+      (function(){
+        var conTasa=prestamos().filter(function(m){ return (m.tasa||0)>0 && (st.deudas[m.id]||0)>0; });
+        if(!conTasa.length) return '';
+        var rec=conTasa.filter(function(m){ return m.recalc; }), sin=conTasa.filter(function(m){ return !m.recalc; });
+        var nombres=function(l){ return l.map(function(m){ return m.nm; }).join(' y '); };
+        return (rec.length?'<p>Estás asumiendo que el banco recalcula intereses al precancelar '+nombres(rec)+'. Confirmalo antes de contar con esa fecha.</p>':'')+
+               (sin.length?'<p>Sin recálculo de intereses en '+nombres(sin)+', adelantar cuotas del préstamo no te ahorra plata: el plan solo ataca las tarjetas.</p>':'');
+      })();
     return sim;
+  }
+
+  // ============ EDITOR DE DEUDAS ============
+  var pPct = function(v){ var n=parseFloat(String(v).replace(/[^\d,.-]/g,'').replace(',','.')); return isNaN(n)?0:n/100; };
+  var fPct = function(t){ return String(Math.round((t||0)*10000)/100).replace('.',','); };
+  var esc = function(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); };
+
+  function cambioDeudas(){ PERFIL.demo=false; renderAll(); guardar(); }
+
+  function borrarDeuda(id){
+    PERFIL.deudas = PERFIL.deudas.filter(function(m){ return m.id!==id; });
+    DEUDAS_META = PERFIL.deudas;
+    delete st.deudas[id];
+    // los pendientes que pagaban esa deuda quedan como pendientes comunes
+    (st.todos||[]).forEach(function(t){ if(t.deuda===id) delete t.deuda; });
+    if(st.objetivoMes && st.objetivoMes.id===id) st.objetivoMes=null;
+    cambioDeudas();
+  }
+
+  function renderEditorDeudas(){
+    var host=el('deudaEditor'); host.innerHTML='';
+    if(!DEUDAS_META.length){
+      host.innerHTML='<div class="card empty">Todavía no hay deudas. Agregá la primera abajo.</div>';
+      return;
+    }
+    DEUDAS_META.forEach(function(m){
+      var prest=esPrestamo(m);
+      var campo=function(lbl, f, val, ayuda){
+        return '<label>'+lbl+(ayuda?' <span style="font-weight:400">· '+ayuda+'</span>':'')+
+               '<input type="text" inputmode="decimal" data-f="'+f+'" value="'+esc(val)+'"></label>';
+      };
+      var c=document.createElement('div'); c.className='card drow';
+      c.innerHTML=
+        '<div class="drow-top"><div style="flex:1;min-width:0">'+
+          '<input class="txt" type="text" data-f="nm" value="'+esc(m.nm)+'" aria-label="Nombre de la deuda" style="font-weight:600;width:100%">'+
+          '<div class="drow-sub">'+(prest?'Préstamo':'Tarjeta')+'</div></div>'+
+          '<button class="ghost danger" data-del style="flex:none">Borrar</button></div>'+
+        '<div class="drow-grid">'+
+          '<label>Nombre corto<input type="text" data-f="corto" value="'+esc(m.corto||'')+'" style="text-align:left;font-family:var(--body);font-weight:500"></label>'+
+          '<label>Detalle<input type="text" data-f="detalle" value="'+esc(m.detalle||'')+'" style="text-align:left;font-family:var(--body);font-weight:500"></label>'+
+          (prest
+            ? campo('Cuotas que faltan','saldo',fmt.format(st.deudas[m.id]||0))+
+              campo('Cuota mensual','cuota',fmt.format(m.cuota||0))+
+              campo('Total original','total',fmt.format(m.total||0),'para la barra')+
+              campo('Tasa anual %','tasa',fPct(m.tasa),'0 si no la sabés')
+            : campo('Saldo actual','saldo',fmt.format(st.deudas[m.id]||0))+
+              campo('Tasa anual %','tasa',fPct(m.tasa))+
+              campo('Pago mínimo','minimo',fmt.format(m.minimo||0))+
+              campo('Cargos fijos por mes','cargo',fmt.format(m.cargo||0),'seguro, mantenimiento')+
+              campo('Saldo al empezar','saldoInicial',fmt.format(m.saldoInicial||0),'para la barra'))+
+          (prest && m.recalc ? campo('Capital pendiente','capital',fmt.format(m.capital||0)) : '')+
+        '</div>'+
+        (prest ? '<label class="toggle"><input type="checkbox" data-f="recalc"'+(m.recalc?' checked':'')+'><span>El banco recalcula intereses si precancelo — preguntá antes de marcarlo</span></label>' : '');
+
+      c.querySelectorAll('input[data-f]').forEach(function(inp){
+        inp.addEventListener('change', function(){
+          var f=inp.dataset.f;
+          if(f==='nm'){ m.nm=inp.value.trim()||'Deuda'; }
+          else if(f==='corto' || f==='detalle'){ m[f]=inp.value.trim(); }
+          else if(f==='recalc'){ m.recalc=inp.checked; }
+          else if(f==='tasa'){ m.tasa=pPct(inp.value); }
+          else if(f==='saldo'){ st.deudas[m.id]=pn(inp.value); }
+          else { m[f]=pn(inp.value); }
+          if(!m.corto) m.corto=m.nm;
+          cambioDeudas();
+        });
+      });
+      var del=c.querySelector('[data-del]');
+      del.addEventListener('click', function(){
+        // dos toques para borrar, sin ventanas emergentes
+        if(!del.dataset.ok){ del.dataset.ok='1'; del.textContent='¿Seguro? Tocá de nuevo'; return; }
+        borrarDeuda(m.id);
+        setStatus('Deuda borrada.');
+      });
+      host.appendChild(c);
+    });
+  }
+
+  function addDeuda(){
+    var n=el('dNm').value.trim(); if(!n){ el('dNm').focus(); return; }
+    var tipo=el('dTipo').value==='prestamo'?'prestamo':'tarjeta';
+    var m = tipo==='prestamo'
+      ? {id:'d'+Date.now(), nm:n, corto:n, tipo:'prestamo', cuota:0, total:0, tasa:0, capital:0, recalc:false, detalle:'Préstamo · cuota fija', patrones:[]}
+      : {id:'d'+Date.now(), nm:n, corto:n, tipo:'tarjeta', tasa:0, cargo:0, minimo:0, saldoInicial:0, detalle:'Tarjeta', patrones:[]};
+    PERFIL.deudas.push(m);
+    st.deudas[m.id]=0;
+    el('dNm').value='';
+    cambioDeudas();
+    setStatus('Deuda agregada. Completá saldo, tasa y mínimo.');
   }
 
   // ============ AHORRO ============
@@ -1265,12 +1380,7 @@
   function renderPerfil(){
     el('warnPerfil').hidden = !PERFIL.demo;
     el('saldoCuenta').textContent = 'lo que tenés en '+(PERFIL.cuenta||'tu cuenta');
-    el('recalcNm').textContent = nombreDeuda('lueno');
     el('puenteMontoTxt').textContent = PERFIL.puenteMonto ? gs(PERFIL.puenteMonto) : 'un monto fijo';
-    el('schedHead').innerHTML = '<th>Mes</th>'+['conti','ueno','lconti','lueno'].map(function(id){
-      var m=DEUDAS_META.filter(function(x){return x.id===id;})[0];
-      return '<th>'+(m?m.corto:id)+'</th>';
-    }).join('')+'<th>Total</th>';
   }
 
   function renderAll(){
@@ -1292,6 +1402,7 @@
     renderAdvice(res,pd);
     renderPresu();
     renderDeudas();
+    renderEditorDeudas();
     renderHist();
 
     var sobra = ingreso() - cuotasFijas() - st.aporte - totalMetas();
@@ -1351,9 +1462,6 @@
           if(typeof d.deudas!=='object') d.deudas=clon(BASE.deudas);
           if(!Array.isArray(d.grupos)||!d.grupos.length) d.grupos=clon(BASE.grupos);
           if(!Array.isArray(d.todos)) d.todos=clon(BASE.todos);
-          // guardados anteriores no tenían el vínculo pendiente↔deuda
-          var LINK={t1:'gnb', t4:'conti', t14:'conti', t5:'lconti', t6:'lueno', t7:'ueno'};
-          d.todos.forEach(function(t){ if(LINK[t.id] && !t.deuda) t.deuda=LINK[t.id]; });
           // limpiar el campo 'real' viejo de las categorías (dato de julio que confundía las barras)
           (d.grupos||[]).forEach(function(g){
           if(!g.t) g.t=g.nm||'Grupo';
@@ -1414,7 +1522,6 @@
           if(!Array.isArray(d.movs))  d.movs=[];
           if(!Array.isArray(d.extras)) d.extras=[];
           if(!Array.isArray(d.ahorros))  d.ahorros=clon(BASE.ahorros);
-          if(typeof d.aporteCard!=='object'||!d.aporteCard) d.aporteCard=clon(BASE.aporteCard);
           if(!d.aporte || d.aporte<=0) d.aporte=BASE.aporte;
           if(typeof d.ciclo!=='object'||!d.ciclo) d.ciclo=clon(BASE.ciclo);
           if(typeof d.ing!=='object') d.ing=clon(BASE.ing);
@@ -1489,7 +1596,6 @@
     renderAll();
   });
   el('aporte').addEventListener('change', guardar);
-  el('recalc').addEventListener('change', function(){ st.recalc=el('recalc').checked; renderAll(); guardar(); });
   el('puenteChk').addEventListener('change', function(){ st.puente=el('puenteChk').checked; renderAll(); guardar(); });
 
 
@@ -1510,8 +1616,7 @@
     var gastos = (st.movs||[]).filter(esGasto).reduce(function(a,v){return a+v.monto;},0);
     var pagosDeuda = (st.movs||[]).filter(function(v){return v.tipo==='deuda';}).reduce(function(a,v){return a+v.monto;},0);
     var ahorro = (st.movs||[]).filter(function(v){return v.tipo==='ahorro';}).reduce(function(a,v){return a+v.monto;},0);
-    var deudaTotal = (st.deudas.conti||0)+(st.deudas.ueno||0)+(st.deudas.gnb||0)
-                   + (st.deudas.lconti||0)*CUOTA_CONTI + (st.deudas.lueno||0)*CUOTA_UENO;
+    var deudaTot = deudaTotal();
     // deuda al INICIO del mes = deuda al cerrar del mes anterior (último registro del historial)
     var deudaInicial = (st.hist && st.hist.length) ? (st.hist[0].deudaTotal||null) : null;
     var hoy=new Date();
@@ -1530,7 +1635,7 @@
       ingreso: ingreso(),
       presupuestado: totalMetas(),
       gastos:gastos, pagosDeuda:pagosDeuda, ahorro:ahorro,
-      saldoFinal:st.saldo, deudaInicial:deudaInicial, deudaTotal:deudaTotal,
+      saldoFinal:st.saldo, deudaInicial:deudaInicial, deudaTotal:deudaTot,
       movimientos:(st.movs||[]).length
     });
     if(st.hist.length>60) st.hist=st.hist.slice(0,60);
@@ -1624,7 +1729,6 @@
         // reparar sub-objetos incompletos (respaldos viejos incompletos)
         if(typeof d.deudas!=='object'||!d.deudas) d.deudas=clon(BASE.deudas);
         Object.keys(BASE.deudas).forEach(function(k){ if(d.deudas[k]===undefined||d.deudas[k]===null) d.deudas[k]=BASE.deudas[k]; });
-        if(typeof d.aporteCard!=='object'||!d.aporteCard) d.aporteCard=clon(BASE.aporteCard);
         if(!d.aporte || d.aporte<=0) d.aporte=BASE.aporte;
         if(typeof d.ing!=='object'||!d.ing) d.ing=clon(BASE.ing);
         if(!Array.isArray(d.grupos)||!d.grupos.length) d.grupos=clon(BASE.grupos);
@@ -1639,9 +1743,6 @@
         if(!Array.isArray(d.hist)) d.hist=[];
         // limpiar el campo 'real' viejo de las categorías
         (d.grupos||[]).forEach(function(g){ if(!g.t) g.t=g.nm||'Grupo'; (g.items||[]).forEach(function(i){ delete i.real; }); });
-        // vincular pendientes con su deuda si falta
-        var LINKimp={t1:'gnb', t4:'conti', t14:'conti', t5:'lconti', t6:'lueno', t7:'ueno'};
-        d.todos.forEach(function(t){ if(LINKimp[t.id] && !t.deuda) t.deuda=LINKimp[t.id]; });
         // saneamiento completo: categorías, reubicación y deduplicación
         d = sanearDatos(d);
         st=d; renderAll(); guardar();
@@ -1668,6 +1769,8 @@
     renderAll(); guardar();
   }
   el('aAdd').addEventListener('click', addAhorro);
+  el('dAdd').addEventListener('click', addDeuda);
+  el('dNm').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addDeuda(); } });
   ['aNm','aObj'].forEach(function(k){
     el(k).addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addAhorro(); } });
   });
