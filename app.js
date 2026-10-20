@@ -694,6 +694,7 @@
     el('hoy').textContent=gs(Math.max(0,pd)); el('hoy').className='big '+cls;
     el('kHoy').textContent=gs(Math.max(0,pd)); el('kHoy').className='v '+cls;
     el('kSaldo').textContent=gs(st.saldo);
+    numVivo(el('hoy'), Math.round(Math.max(0,pd))); numVivo(el('kHoy'), Math.round(Math.max(0,pd))); numVivo(el('kSaldo'), Math.round(st.saldo));
 
     var fCobro = st.cobro ? new Date(st.cobro+'T00:00:00').getDate()+' de '+LARGO[new Date(st.cobro+'T00:00:00').getMonth()] : 'el próximo cobro';
     el('hoySub').textContent = lib<0
@@ -1334,6 +1335,86 @@
     }).join('');
   }
 
+  // ============ ANIMACIONES ============
+  // Solo decorativas: si el dispositivo pide reducir movimiento, no se anima nada.
+  var MOV = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var easeOut = function(t){ return 1-Math.pow(1-t,3); };
+
+  // Lleva el número que muestra un elemento de 'desde' a 'hasta'. Si un render cambia
+  // el texto en el medio, la animación se corta y queda el valor nuevo.
+  function tweenNum(e, desde, hasta, ms){
+    if(!MOV || !e || e===_noop || document.hidden) return;
+    var fin=e.textContent, m=fin.match(/^(Gs\. |−|-)?([\d.]+)$/);
+    if(!m || desde===hasta) return;
+    var pre=m[1]||'', t0=null, id={}, ultimo=null;
+    e._tw=id;
+    function paso(ts){
+      if(e._tw!==id) return;
+      if(ultimo!==null && e.textContent!==ultimo) return; // otro render lo actualizó
+      if(t0===null) t0=ts;
+      var k=Math.min(1,(ts-t0)/ms);
+      ultimo = k<1 ? pre+fmt.format(Math.round(desde+(hasta-desde)*easeOut(k))) : fin;
+      e.textContent=ultimo;
+      if(k<1) requestAnimationFrame(paso);
+    }
+    requestAnimationFrame(paso);
+  }
+  // número animado al cambiar de valor (ej: "Podés gastar hoy" al anotar un gasto)
+  function numVivo(e, valor){
+    var prev=e._val;
+    e._val=valor;
+    if(prev!==undefined && prev!==valor) tweenNum(e, prev, valor, 650);
+  }
+
+  var SEL_NUMS = '.today .big, #kSaldo, #kHoy, .foco-saldo, .big-inline, .gb-v, .hist-v, .slider-val, '+
+                 '.chart-svg text.t1, #todoSum, #ingTot, .obj-top .v b, .foco-v';
+  var SEL_BARRAS = '.bar > div, .obj-bar > div, .gb-bar > div, .drow-progress > div, .bfill, .meter > div';
+
+  function contarDesdeCero(scope){
+    scope.querySelectorAll(SEL_NUMS).forEach(function(e){
+      var m=e.textContent.match(/^(Gs\. |−|-)?([\d.]+)$/);
+      if(m) tweenNum(e, 0, pn(m[2]), 950);
+    });
+  }
+  function crecerBarras(scope){
+    var lista=[];
+    scope.querySelectorAll(SEL_BARRAS).forEach(function(e){
+      var w=e.style.width; if(!w || w==='0%') return;
+      e.style.transition='none'; e.style.width='0%'; lista.push([e,w]);
+    });
+    void scope.offsetWidth;
+    setTimeout(function(){
+      lista.forEach(function(x,i){
+        x[0].style.transition=''; x[0].style.transitionDelay=Math.min(i*30,450)+'ms'; x[0].style.width=x[1];
+        setTimeout(function(){ x[0].style.transitionDelay=''; }, 1500);
+      });
+    }, 30);
+  }
+  function dibujarTorta(scope){
+    var segs=[].slice.call(scope.querySelectorAll('.chart-svg circle[stroke-dasharray]'));
+    segs.forEach(function(c){
+      var p=c.getAttribute('stroke-dasharray').split(' ').map(parseFloat);
+      c.style.transition='none'; c.style.strokeDasharray='0 '+(p[0]+p[1]);
+    });
+    void scope.offsetWidth;
+    setTimeout(function(){
+      segs.forEach(function(c,i){
+        c.style.transition='stroke-dasharray .9s cubic-bezier(.2,.8,.2,1) '+(i*0.08)+'s';
+        c.style.strokeDasharray=c.getAttribute('stroke-dasharray');
+      });
+    }, 30);
+  }
+  // al abrir una sección: entrada escalonada, números desde cero, barras y torta
+  function entrarPanel(id){
+    if(!MOV) return;
+    var p=el('p-'+id); if(p===_noop) return;
+    p.classList.remove('entra'); void p.offsetWidth; p.classList.add('entra');
+    clearTimeout(p._tEntra); p._tEntra=setTimeout(function(){ p.classList.remove('entra'); }, 1000);
+    contarDesdeCero(p);
+    crecerBarras(p);
+    dibujarTorta(p);
+  }
+
   // ============ RENDER GLOBAL ============
   function sincronizarAporte(){
     // OBJETIVO DEL MES: cuánto pagar a la deuda más cara este ciclo (mínimo + extra).
@@ -1541,6 +1622,7 @@
       document.querySelectorAll('.tab').forEach(function(x){ x.setAttribute('aria-selected', x===t?'true':'false'); });
       ['hoy','presu','ahorro','deudas','hist'].forEach(function(p){ el('p-'+p).hidden = (p!==t.dataset.p); });
       window.scrollTo({top:0, behavior:'instant'});
+      entrarPanel(t.dataset.p);
     });
   });
 
@@ -1809,7 +1891,11 @@
 
   st.cobro=defaultCobro();
   renderAll();
-  cargar();
+  cargar().then(function(){
+    var activa=document.querySelector('.tab[aria-selected="true"]');
+    entrarPanel(activa ? activa.dataset.p : 'hoy');
+    contarDesdeCero(el('kSaldo').parentNode.parentNode);
+  });
 
   // ---- PWA: service worker para que abra sin conexión ----
   if('serviceWorker' in navigator){

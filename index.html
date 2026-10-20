@@ -12,25 +12,26 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <div class="wrap">
 
   <div class="top">
+    <div class="brand"><span class="brand-logo" aria-hidden="true">M</span><span class="brand-nm">My Money</span></div>
     <div class="strip">
       <div class="kpi"><div class="k">Saldo en cuenta</div><div class="v" id="kSaldo">—</div></div>
       <div class="kpi"><div class="k">Gastar hoy</div><div class="v ok" id="kHoy">—</div></div>
       <div class="kpi"><div class="k">Deuda cero</div><div class="v" id="kZero">—</div></div>
     </div>
-    <div class="tabs" role="tablist">
-      <button class="tab" role="tab" aria-selected="true" data-p="hoy">Hoy</button>
-      <button class="tab" role="tab" aria-selected="false" data-p="presu">Presupuesto</button>
-      <button class="tab" role="tab" aria-selected="false" data-p="ahorro">Ahorro</button>
-      <button class="tab" role="tab" aria-selected="false" data-p="deudas">Deudas</button>
-      <button class="tab" role="tab" aria-selected="false" data-p="hist">Historial</button>
-    </div>
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button class="tab" role="tab" aria-selected="true" data-p="hoy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg><span>Hoy</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="presu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/></svg><span>Presupuesto</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="ahorro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 10.5c0-3 3.4-5.5 7.5-5.5s7.5 2.5 7.5 5.5c0 2-1.2 3.4-2.5 4.4V18h-3v-1.6c-.7.1-1.3.1-2 .1s-1.3 0-2-.1V18H7v-3.1c-1.3-1-2.5-2.4-2.5-4.4Z"/><path d="M12 8.5v.01"/></svg><span>Ahorro</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="deudas"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><path d="M7 15h4"/></svg><span>Deudas</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="hist"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15v-4"/><path d="M12 15V8"/><path d="M16 15v-6"/></svg><span>Historial</span></button>
+    </nav>
   </div>
 
   <!-- ============ HOY ============ -->
@@ -260,9 +261,8 @@
   </div>
 
   <footer>
-    <div style="font-family:var(--data);font-size:11px;color:var(--moss);font-weight:600;margin-bottom:8px">★ VERSIÓN NUEVA · persistencia arreglada ★</div>
     Tus datos se guardan solo en este dispositivo. Todo se guarda solo. Herramienta de cálculo sobre tus propios datos, no asesoramiento financiero profesional.
   </footer>
 </div>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
