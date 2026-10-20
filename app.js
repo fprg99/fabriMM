@@ -512,7 +512,7 @@
       var u=g[c.id]||0; tm+=c.meta; tg+=u;
       var pct = c.meta>0 ? Math.min(100,u/c.meta*100) : (u>0?100:0);
       var cls = u>c.meta ? 'over' : (u>c.meta*0.8?'mid':'');
-      var d=document.createElement('div'); d.className='cat';
+      var d=document.createElement('div'); d.className='cat'; d.dataset.cat=c.id;
       d.innerHTML='<div class="cat-top"><span>'+c.nm+'</span><span class="vals"><b>'+gs(u)+'</b> / '+gs(c.meta)+
         (u>c.meta?' <span style="color:var(--brick)">+'+gs(u-c.meta)+'</span>':'')+'</span></div>'+
         '<div class="bar"><div class="'+cls+'" style="width:'+pct+'%"></div></div>';
@@ -1240,38 +1240,91 @@
     datos.forEach(function(d,i){
       var bruto = total>0 ? d.v/total*C : 0;
       var len = Math.max(1, bruto - sep);
-      segs+='<circle cx="72" cy="72" r="'+R+'" fill="none" stroke="'+PALETA[i%PALETA.length]+'" stroke-width="'+GR+'"'+
-            ' stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'"></circle>';
+      // dirección hacia afuera del centro de la porción, para "levantarla" al seleccionarla
+      var ang = (off + len/2) / R, dx=(Math.cos(ang)*5).toFixed(2), dy=(Math.sin(ang)*5).toFixed(2);
+      segs+='<circle class="seg" data-i="'+i+'" cx="72" cy="72" r="'+R+'" fill="none" stroke="'+PALETA[i%PALETA.length]+'" stroke-width="'+GR+'"'+
+            ' stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'"'+
+            ' style="--dx:'+dx+'px;--dy:'+dy+'px"><title>'+esc(d.nm)+': '+gs(d.v)+'</title></circle>';
       off+=bruto;
     });
-    return '<svg class="chart-svg" viewBox="0 0 144 144" width="152" height="152" role="img" aria-label="Gasto por categoría">'+
+    return '<svg class="chart-svg" viewBox="0 0 144 144" width="172" height="172" role="img" aria-label="Gasto por categoría">'+
       '<g transform="rotate(-90 72 72)">'+
       '<circle cx="72" cy="72" r="'+R+'" fill="none" stroke="#E9EBE4" stroke-width="'+GR+'"></circle>'+segs+'</g>'+
-      '<text class="t1" x="72" y="70">'+gs(total)+'</text>'+
-      '<text class="t2" x="72" y="83">GASTADO</text></svg>';
+      '<text class="t1" x="72" y="68">'+gs(total)+'</text>'+
+      '<text class="t2" x="72" y="81">GASTADO</text>'+
+      '<text class="t3" x="72" y="93"></text></svg>';
+  }
+
+  // selección de la torta: sobrevive a los re-render (se guarda el nombre, no el elemento)
+  var tortaSel=null, tortaHover=null, TORTA={datos:[], total:0, porCat:{}};
+
+  function marcarTorta(){
+    var host=el('torta'), activo = tortaHover!==null ? tortaHover : tortaSel;
+    var i = activo===null ? -1 : TORTA.datos.map(function(d){return d.nm;}).indexOf(activo);
+    host.classList.toggle('con-sel', i>=0);
+    host.querySelectorAll('[data-i]').forEach(function(e){ e.classList.toggle('on', +e.dataset.i===i); });
+    var t1=host.querySelector('text.t1'), t2=host.querySelector('text.t2'), t3=host.querySelector('text.t3');
+    if(t1){
+      if(i>=0){
+        var d=TORTA.datos[i], nm=d.nm.length>16 ? d.nm.slice(0,15)+'…' : d.nm;
+        t1.textContent=gs(d.v); t2.textContent=nm.toUpperCase();
+        t3.textContent=Math.round(d.v/TORTA.total*100)+'% del gasto';
+      } else {
+        t1.textContent=gs(TORTA.total); t2.textContent='GASTADO'; t3.textContent='';
+      }
+    }
+    // resaltar también la categoría en la lista de abajo
+    el('cats').querySelectorAll('.cat[data-cat]').forEach(function(c){
+      c.classList.toggle('on', i>=0 && TORTA.porCat[c.dataset.cat]===i);
+    });
+  }
+  function indiceDe(e){
+    var x=e.closest('[data-i],.cat[data-cat]'); if(!x) return null;
+    if(x.dataset.i!==undefined) return +x.dataset.i;
+    var i=TORTA.porCat[x.dataset.cat]; return i===undefined ? null : i;
+  }
+  function conectarTorta(host){
+    if(host._conectada) return; host._conectada=true;
+    host.addEventListener('mouseover', function(e){ var i=indiceDe(e.target); tortaHover = i===null ? null : TORTA.datos[i].nm; marcarTorta(); });
+    host.addEventListener('mouseleave', function(){ tortaHover=null; marcarTorta(); });
+    host.addEventListener('keydown', function(e){ if((e.key==='Enter'||e.key===' ') && e.target.closest('[data-i]')){ e.preventDefault(); e.target.click(); } });
+    host.addEventListener('click', function(e){
+      var i=indiceDe(e.target), nm = i===null ? null : TORTA.datos[i].nm;
+      tortaSel = (nm===null || nm===tortaSel) ? null : nm; // otro clic en la misma la suelta
+      tortaHover=null; marcarTorta();
+    });
   }
 
   function renderTorta(g){
-    var todos=todosItems().map(function(c){ return {nm:c.nm, v:g[c.id]||0}; })
+    var todos=todosItems().map(function(c){ return {id:c.id, nm:c.nm, v:g[c.id]||0}; })
                           .filter(function(d){ return d.v>0; })
                           .sort(function(a,b){ return b.v-a.v; });
     var total=todos.reduce(function(a,d){return a+d.v;},0);
     var host=el('torta');
     if(!todos.length){
       host.innerHTML='<div class="empty">Cuando anotes tu primer gasto, acá vas a ver en qué se te va la plata.</div>';
+      TORTA={datos:[], total:0, porCat:{}};
       return;
     }
     // con más de 8 gajos el gráfico se vuelve ilegible: agrupamos la cola
-    var datos=todos;
+    var datos=todos, porCat={};
     if(todos.length>8){
       var cola=todos.slice(7).reduce(function(a,d){return a+d.v;},0);
       datos=todos.slice(0,7).concat([{nm:'Resto ('+(todos.length-7)+' categorías)', v:cola}]);
+      todos.slice(7).forEach(function(d){ porCat[d.id]=7; });
     }
+    todos.slice(0, datos.length===todos.length ? todos.length : 7).forEach(function(d,i){ porCat[d.id]=i; });
+    TORTA={datos:datos, total:total, porCat:porCat};
+    if(tortaSel!==null && !datos.some(function(d){ return d.nm===tortaSel; })) tortaSel=null;
+
     host.innerHTML='<div class="chart-wrap">'+donut(datos,total)+
       '<div class="chart-key">'+datos.map(function(d,i){
-        return '<div><i style="background:'+PALETA[i%PALETA.length]+'"></i><span class="nm">'+d.nm+'</span>'+
+        return '<div data-i="'+i+'" role="button" tabindex="0"><i style="background:'+PALETA[i%PALETA.length]+'"></i><span class="nm">'+esc(d.nm)+'</span>'+
                '<span class="vl">'+gs(d.v)+'</span><span class="pc">'+Math.round(d.v/total*100)+'%</span></div>';
       }).join('')+'</div></div>';
+    conectarTorta(host);
+    conectarTorta(el('cats'));
+    marcarTorta();
   }
 
   function renderBarras(){
@@ -1401,6 +1454,7 @@
       segs.forEach(function(c,i){
         c.style.transition='stroke-dasharray .9s cubic-bezier(.2,.8,.2,1) '+(i*0.08)+'s';
         c.style.strokeDasharray=c.getAttribute('stroke-dasharray');
+        setTimeout(function(){ c.style.transition=''; }, 1100+i*80);
       });
     }, 30);
   }

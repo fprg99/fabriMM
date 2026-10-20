@@ -510,3 +510,24 @@
     .today .meter div{position:relative;overflow:hidden}
     .today .meter div::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);animation:brillo 2.6s ease-in-out 1s infinite}
   }
+
+  /* ---------- torta interactiva ---------- */
+  .chart-svg .seg{cursor:pointer}
+  .chart-svg .seg.on{transform:translate(var(--dx),var(--dy));stroke-width:22;filter:drop-shadow(0 2px 3px rgba(15,43,36,.25))}
+  #torta.con-sel .seg:not(.on){opacity:.28}
+  text.t3{font-family:var(--body);text-anchor:middle;font-size:7.5px;fill:var(--moss);font-weight:600}
+  .chart-key div{cursor:pointer;border-radius:10px;padding:5px 8px;margin:0 -8px}
+  .chart-key div:focus-visible{outline:2px solid var(--moss);outline-offset:1px}
+  .chart-key div.on{background:var(--bone)}
+  .chart-key div.on .nm{font-weight:600;color:var(--ink)}
+  .chart-key div.on i{transform:scale(1.35)}
+  #torta.con-sel .chart-key div:not(.on){opacity:.5}
+  .cat[data-cat]{cursor:pointer}
+  .cat.on{background:#F4F6F0;box-shadow:inset 3px 0 0 var(--moss)}
+  @media (prefers-reduced-motion:no-preference){
+    .chart-svg .seg{transition:stroke-dasharray 1s var(--ease), transform .35s var(--ease), stroke-width .35s var(--ease), opacity .25s ease, filter .25s ease}
+    .chart-key div{transition:background .2s ease, opacity .2s ease, transform .25s var(--ease)}
+    .chart-key div.on{transform:translateX(4px)}
+    .chart-key i{transition:transform .25s var(--ease)}
+    .cat{transition:background .2s ease, box-shadow .2s ease}
+  }
