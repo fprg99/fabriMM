@@ -1,7 +1,7 @@
 // Service worker de My Money: permite abrir la app sin conexión.
 // Estrategia: primero la red (para tener siempre la última versión) y, si no hay
 // conexión, lo último que se guardó. La sincronización nunca pasa por la caché.
-var CACHE = 'my-money-v7';
+var CACHE = 'my-money-v8';
 var BASICOS = ['./', './index.html'];
 
 self.addEventListener('install', function(e){
