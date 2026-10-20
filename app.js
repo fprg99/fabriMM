@@ -618,7 +618,9 @@
       row.className='todo-item'+(t.hecho?' hecho':'');
       row.innerHTML='<input type="checkbox"'+(t.hecho?' checked':'')+' aria-label="Marcar '+t.nm+' como hecho">'+
         '<div class="todo-body"><div class="todo-nm">'+t.nm+'</div>'+
-        '<div class="todo-meta"><span class="due '+cls+'">'+etq+'</span>'+(t.nota||'')+'</div></div>'+
+        '<div class="todo-meta"><span class="due '+cls+'">'+etq+'</span>'+(t.nota||'')+'</div>'+
+        '<div class="todo-rec"><button type="button" class="mini-chip'+(t.rec?' on':'')+'" data-rec title="Vuelve solo cada ciclo">↻ Todos los meses</button>'+
+          (t.rec && t.monto>0 ? '<button type="button" class="mini-chip'+(t.auto?' on':'')+'" data-auto title="El día que vence se marca pagado solo">Débito automático</button>' : '')+'</div></div>'+
         (t.monto>0 || !t.hecho
           ? '<input class="todo-inp" type="text" inputmode="numeric" value="'+fmt.format(t.monto)+'" aria-label="Monto de '+t.nm+'">'
           : '')+
@@ -632,10 +634,22 @@
       var cuerpo=row.querySelector('.todo-body');
       if(cuerpo){
         cuerpo.style.cursor='pointer';
-        cuerpo.addEventListener('click', function(){
+        cuerpo.addEventListener('click', function(e){
+          if(e.target.closest('.todo-rec')) return; // los botones de recurrencia no tildan
           tildarPendiente(t.id, !t.hecho);
         });
       }
+      row.querySelector('[data-rec]').addEventListener('click', function(){
+        t.rec=!t.rec; if(!t.rec) t.auto=false;
+        setStatus(t.rec ? t.nm+' vuelve solo cada ciclo.' : t.nm+' ya no se repite.');
+        renderAll(); guardar();
+      });
+      var ba=row.querySelector('[data-auto]');
+      if(ba) ba.addEventListener('click', function(){
+        t.auto=!t.auto;
+        setStatus(t.auto ? 'El día que vence, '+t.nm+' se marca pagado solo.' : t.nm+': débito automático apagado.');
+        renderAll(); guardar(); if(t.auto) procesarDebitos();
+      });
       var mi=row.querySelector('.todo-inp');
       if(mi) mi.addEventListener('change', function(){
         var nuevo=pn(mi.value), viejo=t.monto;
@@ -713,6 +727,7 @@
   }
 
   function renderAdvice(res, pd){
+    if(!document.getElementById('advice')) return; // reemplazado por 'Tu asesor'
     var res_=reservado(), lib=st.saldo-res_, a=el('advice'), peor=null, ex=0;
     todosItems().forEach(function(c){ var d=(res.g[c.id]||0)-c.meta; if(d>ex){ex=d;peor=c;} });
     var cls,t,b;
@@ -1469,6 +1484,297 @@
     dibujarTorta(p);
   }
 
+  // ============ DÉBITOS AUTOMÁTICOS ============
+  // Pendientes mensuales marcados como débito automático: el día que vencen se marcan pagados solos.
+  function procesarDebitos(){
+    var hoyISO=new Date().toISOString().slice(0,10), hechos=[];
+    (st.todos||[]).forEach(function(t){
+      if(t.rec && t.auto && !t.hecho && t.monto>0 && t.f && t.f<=hoyISO) hechos.push(t);
+    });
+    if(!hechos.length) return;
+    hechos.forEach(function(t){ tildarPendiente(t.id, true); });
+    setStatus(hechos.length===1 ? 'Se registró el débito automático de '+hechos[0].nm+'.' : 'Se registraron '+hechos.length+' débitos automáticos.');
+  }
+
+  // ============ ASESOR ============
+  // Reglas sobre tus propios números. Todo se calcula en este dispositivo: nada sale de acá.
+  // Cada consejo: {id, nivel: 3 alerta · 2 aviso · 1 idea · 0 bien, peso (para ordenar), titulo, texto,
+  //                firma (si cambia, el consejo vuelve a aparecer aunque lo hayas ocultado), accion?}
+  var ASESOR_VER_TODOS = false;
+
+  function cicloActual(){
+    var ini = (st.ciclo && st.ciclo.inicio) || new Date().toISOString().slice(0,10);
+    var fin = sumaMeses(ini, 1);
+    var d0 = new Date(ini+'T00:00:00'), d1 = new Date(fin+'T00:00:00'), h = new Date(); h.setHours(0,0,0,0);
+    var total = Math.max(1, Math.round((d1-d0)/86400000)), pasados = Math.min(total, Math.max(0, Math.round((h-d0)/86400000)));
+    return {ini:ini, fin:fin, total:total, pasados:pasados, frac:pasados/total, quedan:total-pasados};
+  }
+  // cuánto cambia el plan de deudas con otro aporte mensual (meses y pesos de intereses)
+  function efectoAporte(nuevoAporte){
+    var orig = st.aporte, objOrig = st.objetivoMes;
+    var a = simular();
+    st.aporte = Math.max(0, nuevoAporte);
+    var b = simular();
+    st.aporte = orig; st.objetivoMes = objOrig;
+    return {meses: a.meses - b.meses, interes: Math.round(a.interes - b.interes), finA:a.meses, finB:b.meses};
+  }
+  var redondear = function(n, paso){ paso=paso||10000; return Math.round(n/paso)*paso; };
+  var mesesTxt = function(n){ return n===1 ? '1 mes' : n+' meses'; };
+  // ', salís 2 meses antes y te ahorrás 40.000 de intereses' (o la parte que corresponda)
+  function efectoTxt(ef){
+    var p=[];
+    if(ef.meses>0) p.push('salís <b>'+mesesTxt(ef.meses)+' antes</b>');
+    if(ef.interes>0) p.push('te ahorrás <b>'+gs(ef.interes)+'</b> de intereses');
+    return p.length ? ', '+p.join(' y ') : '';
+  }
+
+  function consejos(){
+    var out=[], c=cicloActual(), g=gastadoPorCat(), hoyISO=new Date().toISOString().slice(0,10);
+    var lib = st.saldo - reservado(), pd = lib / dias();
+
+    // 1) la plata no alcanza para lo que vence antes del próximo cobro
+    if(lib < 0){
+      out.push({id:'liquidez', nivel:3, peso:-lib, firma:redondear(-lib,50000),
+        titulo:'No te alcanza para lo que vence antes del cobro',
+        texto:'Te faltan <b>'+gs(-lib)+'</b> para cubrir los pagos pendientes. Priorizá lo que genera mora o intereses (tarjetas y cuotas) y frená los gastos variables hasta cobrar.'});
+    }
+
+    // 2) pagos vencidos o que vencen en los próximos 3 días
+    (st.todos||[]).filter(function(t){ return !t.hecho && t.monto>0; }).forEach(function(t){
+      var d=diasHasta(t.f);
+      if(d<0) out.push({id:'venc-'+t.id, nivel:3, peso:t.monto*2, firma:t.f,
+        titulo:t.nm+' está vencido', texto:'Venció hace '+(-d)+(d===-1?' día':' días')+' ('+gs(t.monto)+'). Cada día de atraso puede sumar punitorios.'});
+      else if(d<=3) out.push({id:'venc-'+t.id, nivel:2, peso:t.monto, firma:t.f,
+        titulo:t.nm+(d===0?' vence hoy':' vence en '+d+(d===1?' día':' días')), texto:'Son <b>'+gs(t.monto)+'</b>. Tildalo en "Lo próximo" cuando lo pagues.'});
+    });
+
+    // 3) categorías: ya pasadas o que a este ritmo se pasan
+    if(c.pasados>=3){
+      todosItems().forEach(function(cat){
+        var gr=grupoDeItem(cat.id); if(!gr || gr.id==='ahorro' || !(cat.meta>0)) return;
+        var u=g[cat.id]||0; if(u<=0) return;
+        if(u>cat.meta){
+          out.push({id:'pasada-'+cat.id, nivel:3, peso:u-cat.meta, firma:redondear(u-cat.meta,50000),
+            titulo:cat.nm+': ya te pasaste', texto:'Llevás <b>'+gs(u)+'</b> de '+gs(cat.meta)+' (+'+gs(u-cat.meta)+'). Lo que gastes acá de ahora en más sale de otra categoría o del aporte a la deuda.'});
+        } else if(gr.id==='var'){
+          var proy = u / Math.max(c.frac, 0.15);
+          if(proy > cat.meta*1.1 && proy-cat.meta>30000){
+            var resto = Math.max(0, cat.meta-u), porDia = resto/Math.max(1,c.quedan);
+            out.push({id:'ritmo-'+cat.id, nivel:2, peso:proy-cat.meta, firma:redondear(proy-cat.meta,50000),
+              titulo:cat.nm+': a este ritmo te pasás', texto:'Con el '+Math.round(c.frac*100)+'% del mes ya gastaste el '+Math.round(u/cat.meta*100)+'% (<b>'+gs(u)+'</b> de '+gs(cat.meta)+'). Si seguís igual cerrás en ~'+gs(redondear(proy))+(porDia>=5000 ? '. Para llegar, gastá hasta <b>'+gs(redondear(porDia,1000))+' por día</b> acá.' : '. Te quedan solo <b>'+gs(resto)+'</b> para los '+c.quedan+' días que faltan.')});
+          }
+        }
+      });
+    }
+
+    // 4) el presupuesto no cierra / sobra plata sin asignar
+    var ahorroMes=(st.ahorros||[]).reduce(function(a,x){return a+(x.aporte||0);},0);
+    var sobra = ingreso() - cuotasFijas() - st.aporte - totalMetas() - ahorroMes;
+    if(ingreso()>0 && sobra < -10000){
+      out.push({id:'nocierra', nivel:3, peso:-sobra, firma:redondear(-sobra,50000),
+        titulo:'Tu presupuesto no cierra', texto:'Asignaste <b>'+gs(-sobra)+'</b> más de lo que entra por mes. Bajá alguna meta en Presupuesto o el dinero extra a la deuda hasta que cierre.'});
+    } else if(ingreso()>0 && sobra > 100000 && DEUDAS_META.length){
+      var ef = efectoAporte(st.aporte + redondear(sobra,10000));
+      out.push({id:'sobra', nivel:1, peso:sobra, firma:redondear(sobra,50000),
+        titulo:'Te quedan '+gs(sobra)+' por mes sin asignar',
+        texto:'Si los sumás al dinero extra para la deuda'+efectoTxt(ef)+'. Si no, mandalos al fondo de emergencia.',
+        accion:{label:'Sumarlos a la deuda', fn:function(){ st.aporte += redondear(sobra,10000); }}});
+    }
+
+    // 5) el efecto de recortar la categoría que más pesa y mandarlo a la deuda
+    var vivas = DEUDAS_META.some(function(m){ return (st.deudas[m.id]||0)>0; });
+    if(vivas){
+      var mayor=null;
+      todosItems().forEach(function(cat){ var gr=grupoDeItem(cat.id); if(gr && gr.id==='var' && cat.meta>=150000 && (!mayor || cat.meta>mayor.meta)) mayor=cat; });
+      if(mayor){
+        var recorte = redondear(mayor.meta*0.2, 10000) || 50000, ef2 = efectoAporte(st.aporte + recorte);
+        if(ef2.interes>0 || ef2.meses>0){
+          out.push({id:'recorte-'+mayor.id, nivel:1, peso:ef2.interes, firma:recorte+'-'+ef2.meses,
+            titulo:'Una palanca: '+mayor.nm, texto:'Si bajás la meta de '+mayor.nm+' <b>'+gs(recorte)+'</b> por mes y lo sumás a la deuda'+efectoTxt(ef2)+'.',
+            accion:{label:'Hacerlo', fn:function(){ mayor.meta=Math.max(0,mayor.meta-recorte); st.aporte+=recorte; }}});
+        }
+      }
+    }
+
+    // 6) fondo de emergencia
+    var fondo=(st.ahorros||[]).filter(function(a){ return /emergencia/i.test(a.nm); })[0];
+    var semana = redondear(totalMetas()/4, 50000);
+    if(fondo && semana>0 && (fondo.guardado||0) < semana){
+      out.push({id:'fondo', nivel:1, peso:semana-(fondo.guardado||0), firma:redondear(fondo.guardado||0,50000),
+        titulo:'Armá un colchón chico primero', texto:'Tu fondo de emergencia tiene '+gs(fondo.guardado||0)+'. Con deudas caras no conviene ahorrar mucho, pero sí <b>~'+gs(semana)+'</b> (una semana de gastos): así un imprevisto no termina en la tarjeta.'});
+    }
+
+    // 7) gasto inusual en el ciclo (más de 2,5 veces lo normal de esa categoría)
+    var porCat={};
+    (st.movs||[]).filter(esGasto).forEach(function(m){ (porCat[m.cat]=porCat[m.cat]||[]).push(m); });
+    Object.keys(porCat).forEach(function(k){
+      var l=porCat[k]; if(l.length<3) return;
+      var montos=l.map(function(m){return m.monto;}).sort(function(a,b){return a-b;}), med=montos[Math.floor(montos.length/2)];
+      var top=l.reduce(function(a,m){ return m.monto>a.monto?m:a; });
+      if(top.monto>=100000 && top.monto>med*2.5){
+        var cat=todosItems().filter(function(x){return x.id===k;})[0];
+        out.push({id:'raro-'+k+'-'+top.monto, nivel:2, peso:top.monto, firma:'1',
+          titulo:'Gasto fuera de lo común', texto:'<b>'+gs(top.monto)+'</b> en '+(cat?cat.nm:'otros')+(top.d?' ('+esc(top.d)+')':'')+', unas '+Math.round(top.monto/med)+' veces lo que gastás normalmente ahí. Si fue algo puntual, todo bien; si no, revisalo.'});
+      }
+    });
+
+    // 8) suscripciones
+    var subs=todosItems().filter(function(x){return x.id==='subs';})[0];
+    if(subs && (g.subs||0)>0 && !((g.subs||0)>subs.meta && subs.meta>0)){ // si ya está la alerta de pasada, no repetir
+      out.push({id:'subs', nivel:1, peso:(g.subs||0), firma:redondear(g.subs||0,20000),
+        titulo:'Revisá tus suscripciones', texto:'Este mes van <b>'+gs(g.subs)+'</b> en suscripciones: son ~'+gs(redondear(g.subs*12))+' al año. Cancelar una que no uses es plata que vuelve todos los meses.'});
+    }
+
+    // 9) gastos fijos sin pendiente mensual
+    todosItems().forEach(function(cat){
+      var gr=grupoDeItem(cat.id); if(!gr || gr.id!=='fijo' || !(cat.meta>0)) return;
+      var tiene=(st.todos||[]).some(function(t){ return t.cat===cat.id && t.rec; });
+      if(!tiene) out.push({id:'rec-'+cat.id, nivel:1, peso:cat.meta/10, firma:'1',
+        titulo:cat.nm+' se paga todos los meses', texto:'Agregalo como pendiente mensual y la app te lo recuerda solo cada ciclo, con su monto ('+gs(cat.meta)+').',
+        accion:{label:'Agregar pendiente mensual', fn:function(){
+          var f=new Date(c.ini+'T00:00:00'); f.setDate(Math.min(28, f.getDate()+3));
+          var fISO=f.toISOString().slice(0,10);
+          if(fISO < new Date().toISOString().slice(0,10)) fISO=sumaMeses(fISO,1); // la próxima vez que toca, no una fecha ya pasada
+          st.todos.push({id:'t'+Date.now(), nm:cat.nm, monto:cat.meta, f:fISO, hecho:false, rec:true, nota:'Fecha estimada según tu ciclo.', cat:cat.id});
+        }}});
+    });
+
+    // 10) un solo retiro por mes
+    if(st.ing && st.ing.retiros>1 && st.ing.fee>0){
+      out.push({id:'retiros', nivel:1, peso:st.ing.fee*st.ing.tc*12/4, firma:st.ing.retiros,
+        titulo:'Ahorrá en comisiones', texto:'Retirar el sueldo una sola vez por mes te ahorra <b>'+gs(st.ing.fee*(st.ing.retiros-1)*st.ing.tc*12)+'</b> al año. En Presupuesto está el detalle del colchón que necesitás para hacerlo.'});
+    }
+
+    // 11) comparado con el mes pasado
+    var ult=(st.hist||[])[0];
+    if(ult && ult.gastos>0 && c.pasados>=5){
+      var gastoHoy=(st.movs||[]).filter(esGasto).reduce(function(a,v){return a+v.monto;},0);
+      var proyMes=gastoHoy/Math.max(c.frac,0.2);
+      if(proyMes>ult.gastos*1.2) out.push({id:'vsmes', nivel:2, peso:proyMes-ult.gastos, firma:redondear(proyMes-ult.gastos,100000),
+        titulo:'Vas gastando más que el mes pasado', texto:'A este ritmo cerrás el ciclo en ~<b>'+gs(redondear(proyMes))+'</b>, contra '+gs(ult.gastos)+' en '+ult.etiqueta+' (+'+Math.round((proyMes/ult.gastos-1)*100)+'%).'});
+    }
+
+    // si no hay nada urgente, decirlo
+    if(!out.some(function(x){ return x.nivel>=2; }) && lib>=0){
+      var gastoT=Object.keys(g).reduce(function(a,k){return a+(g[k]||0);},0), tm=totalMetas();
+      out.push({id:'bien', nivel:0, peso:0, firma:'1', titulo:'Vas bien',
+        texto:'Llevás el '+(tm>0?Math.round(gastoT/tm*100):0)+'% del presupuesto con el '+Math.round(c.frac*100)+'% del ciclo transcurrido, y podés gastar '+gs(Math.max(0,pd))+' por día. Seguí así.'});
+    }
+
+    var ocultos=st.asesorOcultos||{};
+    return out.filter(function(x){ return ocultos[x.id]!==String(x.firma); })
+              .sort(function(a,b){ return (b.nivel-a.nivel) || (b.peso-a.peso); });
+  }
+
+  var NIVEL_CLASE=['bien','idea','aviso','alerta'], NIVEL_TXT=['Bien','Idea','Atención','Urgente'];
+  function renderAsesor(){
+    var host=el('asesor'); if(host===_noop) return;
+    var lista=consejos(), visibles = ASESOR_VER_TODOS ? lista : lista.slice(0,3);
+    host.innerHTML = visibles.map(function(x, i){
+      return '<div class="cons '+NIVEL_CLASE[x.nivel]+'" data-i="'+i+'">'+
+        '<div class="cons-top"><span class="cons-tag">'+NIVEL_TXT[x.nivel]+'</span><span class="cons-tit">'+esc(x.titulo)+'</span></div>'+
+        '<p class="cons-txt">'+x.texto+'</p>'+
+        '<div class="cons-act">'+(x.accion?'<button class="cons-hacer">'+esc(x.accion.label)+'</button>':'')+
+        (x.id!=='bien'?'<button class="ghost cons-ok">Entendido</button>':'')+'</div></div>';
+    }).join('') + (lista.length>3 ? '<button class="ghost cons-mas" type="button">'+(ASESOR_VER_TODOS?'Ver menos':'Ver '+(lista.length-3)+' consejos más')+'</button>' : '');
+    host.querySelectorAll('.cons').forEach(function(nodo){
+      var x=visibles[+nodo.dataset.i];
+      var ok=nodo.querySelector('.cons-ok');
+      if(ok) ok.addEventListener('click', function(){
+        st.asesorOcultos=st.asesorOcultos||{}; st.asesorOcultos[x.id]=String(x.firma);
+        nodo.classList.add('saliendo'); setTimeout(function(){ renderAll(); guardar(); }, MOV?260:0);
+      });
+      var hacer=nodo.querySelector('.cons-hacer');
+      if(hacer) hacer.addEventListener('click', function(){ x.accion.fn(); renderAll(); guardar(); setStatus('Listo: '+x.accion.label.toLowerCase()+'.'); });
+    });
+    var mas=host.querySelector('.cons-mas');
+    if(mas) mas.addEventListener('click', function(){ ASESOR_VER_TODOS=!ASESOR_VER_TODOS; renderAsesor(); });
+  }
+
+  // ============ EVOLUCIÓN MES A MES ============
+  // Usa la foto de cada mes cerrado (st.hist) más el mes en curso.
+  var MES_CORTO = function(etq){ var p=(etq||'').split(' '); var i=LARGO.indexOf(p[0]); return (i>=0?MESES[i]:p[0])+' '+(p[1]||'').slice(2); };
+
+  function serieMeses(){
+    var hist=(st.hist||[]).slice(0,11).reverse();
+    var c=cicloActual(), gastoHoy=(st.movs||[]).filter(esGasto).reduce(function(a,v){return a+v.monto;},0);
+    var d0=new Date(c.ini+'T00:00:00');
+    var actual={etiqueta:LARGO[d0.getMonth()]+' '+d0.getFullYear(), gastos:gastoHoy, presupuestado:totalMetas(),
+                deudaTotal:deudaTotal(), pagosDeuda:sumaTipo('deuda'), porCat:gastadoPorCat(), enCurso:true};
+    return hist.concat([actual]);
+  }
+
+  function graficoGastos(meses){
+    var W=Math.max(320, meses.length*64+40), H=190, base=H-28, alto=base-18;
+    var tope=Math.max.apply(null, meses.map(function(m){ return Math.max(m.gastos||0, m.presupuestado||0); }))||1;
+    var bw=Math.min(22, (W-40)/meses.length/2.6);
+    var barras=meses.map(function(m,i){
+      var x=30+i*((W-40)/meses.length)+((W-40)/meses.length)/2;
+      var hp=(m.presupuestado||0)/tope*alto, hg=(m.gastos||0)/tope*alto, pasado=(m.gastos||0)>(m.presupuestado||0) && m.presupuestado>0;
+      var d=i*0.06;
+      return '<g>'+
+        '<rect class="ev-bar ppto" x="'+(x-bw-2)+'" y="'+(base-hp)+'" width="'+bw+'" height="'+Math.max(1,hp)+'" rx="3" style="animation-delay:'+d+'s"><title>'+m.etiqueta+' · presupuesto '+gs(m.presupuestado||0)+'</title></rect>'+
+        '<rect class="ev-bar gasto'+(pasado?' pasado':'')+(m.enCurso?' curso':'')+'" x="'+(x+2)+'" y="'+(base-hg)+'" width="'+bw+'" height="'+Math.max(1,hg)+'" rx="3" style="animation-delay:'+(d+0.08)+'s"><title>'+m.etiqueta+' · gastaste '+gs(m.gastos||0)+(m.enCurso?' (en curso)':'')+'</title></rect>'+
+        '<text class="ev-lbl" x="'+x+'" y="'+(H-10)+'">'+MES_CORTO(m.etiqueta)+(m.enCurso?'*':'')+'</text></g>';
+    }).join('');
+    return '<svg class="ev-svg" viewBox="0 0 '+W+' '+H+'"'+(meses.length>6?' style="min-width:'+(meses.length*52)+'px"':'')+' role="img" aria-label="Gasto contra presupuesto por mes">'+
+      '<line x1="24" x2="'+(W-8)+'" y1="'+base+'" y2="'+base+'" class="ev-eje"/>'+barras+'</svg>';
+  }
+
+  function graficoDeuda(meses){
+    var pts=meses.filter(function(m){ return m.deudaTotal!==undefined && m.deudaTotal!==null; });
+    if(pts.length<2) return '<div class="empty">Con dos meses cerrados vas a ver cómo baja tu deuda.</div>';
+    var W=Math.max(320, pts.length*64+40), H=170, top=20, base=H-30;
+    var max=Math.max.apply(null, pts.map(function(m){return m.deudaTotal;})), min=Math.min.apply(null, pts.map(function(m){return m.deudaTotal;}));
+    var rango=Math.max(1, max-min*0.85), piso=min*0.85;
+    var xy=pts.map(function(m,i){ return [44+i*((W-88)/(pts.length-1)), base-((m.deudaTotal-piso)/rango)*(base-top)]; });
+    var linea=xy.map(function(p,i){ return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1); }).join(' ');
+    var area=linea+' L'+xy[xy.length-1][0].toFixed(1)+' '+base+' L'+xy[0][0].toFixed(1)+' '+base+' Z';
+    var puntos=xy.map(function(p,i){ var m=pts[i]; return '<circle class="ev-pto'+(m.enCurso?' curso':'')+'" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4"><title>'+m.etiqueta+' · deuda '+gs(m.deudaTotal)+'</title></circle>'+
+      '<text class="ev-lbl" x="'+p[0].toFixed(1)+'" y="'+(H-10)+'">'+MES_CORTO(m.etiqueta)+(m.enCurso?'*':'')+'</text>'; }).join('');
+    var primero=pts[0].deudaTotal, ultimo=pts[pts.length-1].deudaTotal;
+    return '<svg class="ev-svg" viewBox="0 0 '+W+' '+H+'"'+(pts.length>6?' style="min-width:'+(pts.length*52)+'px"':'')+' role="img" aria-label="Deuda total por mes">'+
+      '<defs><linearGradient id="evArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E6A4E" stop-opacity=".22"/><stop offset="1" stop-color="#2E6A4E" stop-opacity="0"/></linearGradient></defs>'+
+      '<path class="ev-area" d="'+area+'" fill="url(#evArea)"/>'+
+      '<path class="ev-linea" d="'+linea+'" pathLength="1"/>'+puntos+
+      '<text class="ev-val" x="'+xy[0][0].toFixed(1)+'" y="'+(xy[0][1]-9).toFixed(1)+'">'+gs(primero)+'</text>'+
+      '<text class="ev-val fin" x="'+xy[xy.length-1][0].toFixed(1)+'" y="'+(xy[xy.length-1][1]-9).toFixed(1)+'">'+gs(ultimo)+'</text></svg>'+
+      '<div class="ev-pie">'+(ultimo<primero ? 'Bajaste <b>'+gs(primero-ultimo)+'</b> de deuda desde '+pts[0].etiqueta+'.' : 'La deuda no bajó desde '+pts[0].etiqueta+'.')+'</div>';
+  }
+
+  function tablaCategorias(meses){
+    var previos=meses.filter(function(m){ return !m.enCurso && m.porCat; });
+    var actual=meses[meses.length-1], c=cicloActual();
+    if(!previos.length) return '<div class="empty">Desde el próximo cierre de mes vas a ver acá cada categoría comparada con tu promedio.</div>';
+    var filas=todosItems().map(function(cat){
+      var prom=previos.reduce(function(a,m){ return a+((m.porCat||{})[cat.id]||0); },0)/previos.length;
+      var hoy=(actual.porCat||{})[cat.id]||0, proy=hoy/Math.max(c.frac,0.2);
+      return {nm:cat.nm, prom:prom, hoy:hoy, proy:proy, dif:prom>0?(proy/prom-1):0};
+    }).filter(function(f){ return f.prom>0 || f.hoy>0; }).sort(function(a,b){ return Math.abs(b.proy-b.prom)-Math.abs(a.proy-a.prom); }).slice(0,8);
+    var temprano = c.pasados<5; // al arrancar el ciclo la proyección todavía no dice nada
+    return '<div class="ev-tabla"><div class="ev-fila ev-cab"><span>Categoría</span><span>Promedio</span><span>Este mes</span><span></span></div>'+
+      filas.map(function(f){
+        var sube=f.dif>0.15, baja=f.dif<-0.15;
+        return '<div class="ev-fila"><span>'+esc(f.nm)+'</span><span class="num">'+gs(redondear(f.prom,1000))+'</span><span class="num">'+gs(f.hoy)+'</span>'+
+          '<span class="ev-dif '+(temprano?'':sube?'sube':baja?'baja':'')+'">'+(temprano ? '—' : f.prom>0 ? (sube?'▲ ':baja?'▼ ':'')+Math.round(Math.abs(f.dif)*100)+'%' : 'nuevo')+'</span></div>';
+      }).join('')+'</div><div class="ev-pie">"Este mes" es lo gastado hasta hoy; el porcentaje compara lo que proyectás a fin de ciclo contra tu promedio'+(temprano?' (aparece a partir del día 5 del ciclo)':'')+'.</div>';
+  }
+
+  function renderEvolucion(){
+    var host=el('evolucion'); if(host===_noop) return;
+    var meses=serieMeses();
+    if(meses.length<2){
+      host.innerHTML='<div class="card empty">Cuando cierres tu primer mes, acá vas a ver la evolución de tus gastos y tu deuda.</div>';
+      return;
+    }
+    host.innerHTML=
+      '<div class="card ev-card"><div class="ev-tit">Gasto contra presupuesto</div>'+
+        '<div class="ev-ley"><span><i class="ppto"></i>Presupuesto</span><span><i class="gasto"></i>Gastaste</span><span><i class="pasado"></i>Te pasaste</span></div>'+
+        '<div class="ev-scroll">'+graficoGastos(meses)+'</div><div class="ev-pie">* mes en curso</div></div>'+
+      '<div class="card ev-card"><div class="ev-tit">Deuda total</div><div class="ev-scroll">'+graficoDeuda(meses)+'</div></div>'+
+      '<div class="card ev-card"><div class="ev-tit">Tus categorías contra tu promedio</div>'+tablaCategorias(meses)+'</div>';
+  }
+
   // ============ RENDER GLOBAL ============
   function sincronizarAporte(){
     // OBJETIVO DEL MES: cuánto pagar a la deuda más cara este ciclo (mínimo + extra).
@@ -1535,10 +1841,12 @@
     renderMovs();
     var pd=renderHoy(res);
     renderAdvice(res,pd);
+    renderAsesor();
     renderPresu();
     renderDeudas();
     renderEditorDeudas();
     renderHist();
+    renderEvolucion();
 
     var sobra = ingreso() - cuotasFijas() - st.aporte - totalMetas();
     var k=el('kSobra');
@@ -1995,14 +2303,14 @@
     var nuevo={
       id:'t'+Date.now(), nm:n, monto:pn(el('tAmt').value),
       f: el('tFec').value || new Date().toISOString().slice(0,10),
-      hecho:false, rec:false, nota:''
+      hecho:false, rec:el('tRec').checked, nota:''
     };
     // asignar categoría o deuda según lo elegido
     var elegido=el('tCat').value;
     if(elegido.indexOf('cat:')===0) nuevo.cat=elegido.slice(4);
     else if(elegido.indexOf('deuda:')===0) nuevo.deuda=elegido.slice(6);
     st.todos.push(nuevo);
-    el('tNm').value=''; el('tAmt').value=''; el('tFec').value=''; el('tCat').value='';
+    el('tNm').value=''; el('tAmt').value=''; el('tFec').value=''; el('tCat').value=''; el('tRec').checked=false;
     renderAll(); guardar();
   }
   el('tAdd').addEventListener('click', addTodo);
@@ -2060,6 +2368,7 @@
       presupuestado: totalMetas(),
       gastos:gastos, pagosDeuda:pagosDeuda, ahorro:ahorro,
       saldoFinal:st.saldo, deudaInicial:deudaInicial, deudaTotal:deudaTot,
+      porCat:(function(){ var g=gastadoPorCat(), o={}; Object.keys(g).forEach(function(k){ if(g[k]>0) o[k]=g[k]; }); return o; })(),
       movimientos:(st.movs||[]).length
     });
     if(st.hist.length>60) st.hist=st.hist.slice(0,60);
@@ -2070,6 +2379,7 @@
     (st.todos||[]).forEach(function(t){ if(t.id==='t15'){ t.editado=false; t.hecho=false; } });
     st.objetivoMes=null;
     st.movs=[];
+    st.asesorOcultos={}; // ciclo nuevo: los consejos ocultos vuelven a evaluarse
     var nuevos=[];
     (st.todos||[]).forEach(function(t){
       if(!t.rec){
@@ -2244,7 +2554,10 @@
     entrarPanel(activa ? activa.dataset.p : 'hoy');
     contarDesdeCero(el('kSaldo').parentNode.parentNode);
     iniciarSync();
+    // los débitos automáticos esperan a que llegue lo último de la nube (evita registrarlos dos veces)
+    setTimeout(procesarDebitos, 6000);
   });
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') setTimeout(procesarDebitos, 6000); });
 
   // ---- PWA: service worker para que abra sin conexión (sw.js) ----
   if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='127.0.0.1' || location.hostname==='localhost')){

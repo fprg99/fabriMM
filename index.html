@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="styles.css?v=10">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -89,11 +89,15 @@
         <input class="na" id="tAmt" type="text" inputmode="numeric" placeholder="Monto" aria-label="Monto">
         <select class="na" id="tCat" style="width:150px;font-family:var(--body)" aria-label="Categoría"></select>
         <input class="na" id="tFec" type="date" style="width:135px" aria-label="Fecha de vencimiento">
+        <label class="rec-chk"><input type="checkbox" id="tRec"> Se repite cada mes</label>
         <button class="ghost" id="tAdd">Agregar</button>
       </div>
     </div>
 
-    <div class="card advice" id="advice"></div>
+    <h2>Tu asesor</h2>
+    <p class="sub-t">Lo más importante de tus números ahora, ordenado por urgencia. Se calcula en este dispositivo.</p>
+    <div class="card asesor" id="asesor"></div>
+    <p class="asesor-nota">Sugerencias automáticas sobre tus propios datos. No reemplazan a un asesor financiero profesional.</p>
     </div>
 
     <div class="col">
@@ -285,6 +289,11 @@
       <button class="ghost" id="cerrarMesBtn" style="width:100%">Cerrar el mes actual ahora</button>
       <div class="drow-sub" style="margin-top:7px">Guarda la foto de este mes y arranca uno nuevo, sin esperar al próximo cobro.</div>
     </div>
+    <h2>Evolución</h2>
+    <p class="sub-t">Cómo vienen tus gastos y tu deuda mes a mes. Tocá o pasá el mouse sobre una barra para ver el monto.</p>
+    <div id="evolucion"></div>
+
+    <h2>Cada mes</h2>
     <div id="histList"></div>
   </div>
 
@@ -293,4 +302,4 @@
   </footer>
 </div>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
