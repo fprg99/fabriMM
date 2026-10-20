@@ -1580,6 +1580,7 @@
     }catch(e){
       el('warnSave').hidden=false;
     }
+    syncMarcarCambio();
   }
   async function cargar(){
     var raw=null;
@@ -1668,6 +1669,233 @@
     }
     st.cobro=st.cobro||defaultCobro();
     renderAll();
+  }
+
+  // ============ SINCRONIZACIÓN ENTRE DISPOSITIVOS ============
+  // Los datos se cifran en este dispositivo (AES-GCM) con una clave que sale de tu frase.
+  // El servidor solo guarda texto cifrado bajo un id que también sale de la frase:
+  // sin la frase, nadie (ni el servidor) puede leer tus números.
+  var SYNC_URL = 'https://my-money-sync.vercel.app/api/sync';
+  var SYNC_KEY = 'mm-sync:v1';      // {id, k, etag, pend, ult, remotoAt, remotoDev}
+  var SYNC_DESCARTE = 'mm-sync:descartado';
+  var sync = null, syncClave = null, syncEstado = 'off', syncConflicto = null, syncAplicando = false, syncTimer = null, syncEnCurso = false;
+
+  var b64 = function(buf){ var s='', b=new Uint8Array(buf); for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s); };
+  var deB64 = function(t){ var s=atob(t), b=new Uint8Array(s.length); for(var i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return b; };
+  var hex = function(b){ return Array.prototype.map.call(b, function(x){ return ('0'+x.toString(16)).slice(-2); }).join(''); };
+  function nombreDispositivo(){ return /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Teléfono' : 'Compu'; }
+  // la frase se normaliza: sin espacios ni guiones y en minúsculas, así "ABCD-efgh" = "abcd efgh"
+  function normalizarFrase(f){ return String(f||'').normalize('NFKC').toLowerCase().replace(/[\s\-_.]+/g,''); }
+  function generarFrase(){
+    var abc='abcdefghjkmnpqrstuvwxyz23456789', r=new Uint8Array(20), out=[];
+    crypto.getRandomValues(r);
+    for(var i=0;i<20;i++){ out.push(abc[r[i]%abc.length]); if(i%4===3 && i<19) out.push('-'); }
+    return out.join('');
+  }
+  async function derivar(frase){
+    var base=await crypto.subtle.importKey('raw', new TextEncoder().encode(frase), 'PBKDF2', false, ['deriveBits']);
+    var bits=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:new TextEncoder().encode('my-money:sync:v1'), iterations:600000}, base, 512));
+    return { k: b64(bits.slice(0,32)), id: hex(bits.slice(32)) };
+  }
+  async function claveAes(){
+    if(!syncClave) syncClave = await crypto.subtle.importKey('raw', deB64(sync.k), 'AES-GCM', false, ['encrypt','decrypt']);
+    return syncClave;
+  }
+  async function cifrar(obj){
+    var iv=crypto.getRandomValues(new Uint8Array(12));
+    var ct=await crypto.subtle.encrypt({name:'AES-GCM', iv:iv}, await claveAes(), new TextEncoder().encode(JSON.stringify(obj)));
+    return {v:1, iv:b64(iv), ct:b64(ct), at:Date.now(), dev:nombreDispositivo()};
+  }
+  async function descifrar(p){
+    var pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:deB64(p.iv)}, await claveAes(), deB64(p.ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  function guardarMeta(){ try{ if(sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }catch(e){} }
+  function cargarMeta(){ try{ var m=JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); if(m && m.id && m.k) sync=m; }catch(e){} }
+  function tieneDatosPropios(){ return (st.movs||[]).length>0 || (PERFIL && !PERFIL.demo && DEUDAS_META.length>0); }
+
+  function ponerEstado(e){ syncEstado=e; renderSync(); }
+
+  // lo llama guardar(): marca que hay cambios y programa la subida
+  function syncMarcarCambio(){
+    if(!sync || syncAplicando) return;
+    sync.pend=true; guardarMeta();
+    clearTimeout(syncTimer); syncTimer=setTimeout(subir, 2500);
+    if(syncEstado!=='conflicto') ponerEstado('pendiente');
+  }
+
+  async function subir(forzarEtag){
+    if(!sync || syncEnCurso) return;
+    if(syncConflicto && forzarEtag===undefined) return; // esperar a que elijas
+    if(!navigator.onLine){ ponerEstado('offline'); return; }
+    syncEnCurso=true; ponerEstado('subiendo');
+    try{
+      var etag = forzarEtag!==undefined ? forzarEtag : sync.etag;
+      var h={'Content-Type':'application/json'}; if(etag) h['If-Match']=etag;
+      var cuerpo=JSON.stringify(await cifrar(st));
+      // keepalive deja terminar la subida aunque cierres la app, pero solo acepta cuerpos chicos
+      var r=await fetch(SYNC_URL+'?id='+sync.id, {method:'PUT', headers:h, body:cuerpo, keepalive:cuerpo.length<60000});
+      if(r.status===412){ syncEnCurso=false; await bajar(true); return; }
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      sync.etag=r.headers.get('ETag'); sync.pend=false; sync.ult=Date.now(); sync.remotoDev=nombreDispositivo(); sync.remotoAt=sync.ult;
+      guardarMeta(); syncConflicto=null; ponerEstado('ok');
+    }catch(e){ ponerEstado(navigator.onLine?'error':'offline'); }
+    syncEnCurso=false;
+  }
+
+  // trae lo último de la nube. Si acá también hay cambios sin subir, te pregunta.
+  async function bajar(trasRechazo){
+    if(!sync || syncEnCurso) return;
+    if(!navigator.onLine){ ponerEstado('offline'); return; }
+    syncEnCurso=true; if(syncEstado!=='conflicto') ponerEstado('bajando');
+    try{
+      var h={}; if(sync.etag && !trasRechazo) h['If-None-Match']=sync.etag;
+      var r=await fetch(SYNC_URL+'?id='+sync.id, {headers:h, cache:'no-store'});
+      syncEnCurso=false;
+      if(r.status===304){ sync.ult=Date.now(); guardarMeta(); if(sync.pend) subir(); else ponerEstado('ok'); return; }
+      if(r.status===404){ sync.etag=null; guardarMeta(); subir(); return; } // nube vacía: subir lo de acá
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      var etag=r.headers.get('ETag'), p=await r.json(), remoto=await descifrar(p);
+      if(sync.pend || trasRechazo){
+        syncConflicto={estado:remoto, etag:etag, at:p.at, dev:p.dev};
+        ponerEstado('conflicto');
+        return;
+      }
+      aplicarRemoto(remoto, etag, p);
+    }catch(e){ syncEnCurso=false; ponerEstado(navigator.onLine?'error':'offline'); }
+  }
+
+  function aplicarRemoto(remoto, etag, p){
+    syncAplicando=true;
+    try{
+      st = normalizarEstado(remoto);
+      sync.etag=etag; sync.pend=false; sync.ult=Date.now();
+      if(p){ sync.remotoAt=p.at; sync.remotoDev=p.dev; }
+      guardarMeta(); renderAll(); guardar();
+    } finally { syncAplicando=false; }
+    syncConflicto=null; ponerEstado('ok');
+  }
+
+  function guardarDescartado(estado){ try{ localStorage.setItem(SYNC_DESCARTE, JSON.stringify({at:Date.now(), estado:estado})); }catch(e){} }
+
+  async function conectar(frase){
+    var f=normalizarFrase(frase);
+    if(f.length<12){ ponerAviso('La frase tiene que tener al menos 12 letras o números. Usá «Generar una frase segura» si querés.'); return; }
+    if(!window.crypto || !crypto.subtle){ ponerAviso('Este navegador no permite cifrar datos. Abrí la app desde la dirección https.'); return; }
+    ponerAviso(''); ponerEstado('conectando');
+    try{
+      var d=await derivar(f);
+      sync={id:d.id, k:d.k, etag:null, pend:false, ult:null, remotoAt:null, remotoDev:null}; syncClave=null;
+      var r=await fetch(SYNC_URL+'?id='+sync.id, {cache:'no-store'});
+      if(r.status===404){ guardarMeta(); await subir(); setStatus('Listo: este dispositivo subió tus datos a la nube.'); return; }
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      var etag=r.headers.get('ETag'), p=await r.json(), remoto=await descifrar(p);
+      guardarMeta();
+      if(tieneDatosPropios()){
+        // los dos lados tienen datos: elegís vos
+        syncConflicto={estado:remoto, etag:etag, at:p.at, dev:p.dev, inicial:true};
+        ponerEstado('conflicto');
+      } else {
+        aplicarRemoto(remoto, etag, p);
+        setStatus('Listo: se cargaron tus datos de la nube.');
+      }
+    }catch(e){
+      sync=null; syncClave=null; guardarMeta();
+      ponerAviso('No se pudo conectar. Revisá la conexión a internet e intentá de nuevo.');
+      ponerEstado('off');
+    }
+  }
+  function desconectar(){
+    clearTimeout(syncTimer); sync=null; syncClave=null; syncConflicto=null; guardarMeta(); ponerEstado('off');
+    setStatus('Este dispositivo dejó de sincronizar. Tus datos siguen acá.');
+  }
+  function elegirLocal(){
+    if(!syncConflicto) return;
+    guardarDescartado(syncConflicto.estado);
+    var etag=syncConflicto.etag; syncConflicto=null;
+    subir(etag);
+  }
+  function elegirNube(){
+    if(!syncConflicto) return;
+    guardarDescartado(st);
+    var c=syncConflicto; aplicarRemoto(c.estado, c.etag, {at:c.at, dev:c.dev});
+    setStatus('Listo: ahora tenés los datos de la nube.');
+  }
+
+  function haceCuanto(t){
+    if(!t) return 'nunca';
+    var s=Math.round((Date.now()-t)/1000);
+    if(s<60) return 'recién'; if(s<3600) return 'hace '+Math.round(s/60)+' min';
+    if(s<86400) return 'hace '+Math.round(s/3600)+' h';
+    return new Date(t).toLocaleDateString('es-PY',{day:'numeric', month:'short'});
+  }
+  function ponerAviso(t){ var a=el('syncMsg'); a.textContent=t; a.hidden=!t; }
+
+  var SYNC_TXT = {
+    off:['','Sin sincronizar'], conectando:['run','Conectando…'], subiendo:['run','Sincronizando…'], bajando:['run','Sincronizando…'],
+    pendiente:['run','Cambios por subir'], ok:['ok','Sincronizado'], offline:['off','Sin conexión · se sube al volver'],
+    error:['bad','No se pudo sincronizar'], conflicto:['bad','Elegí qué datos conservar']
+  };
+  function renderSync(){
+    var activo=!!sync, t=SYNC_TXT[syncEstado]||SYNC_TXT.off;
+    el('syncOff').hidden=activo;
+    el('syncOn').hidden=!activo;
+    var chip=el('syncChip');
+    chip.hidden=!activo; chip.className='sync-chip '+t[0]; chip.querySelector('span').textContent=t[1];
+    if(!activo) return;
+    el('syncEstado').className='sync-estado '+t[0];
+    el('syncEstado').textContent=t[1];
+    el('syncDetalle').textContent = 'Última sincronización: '+haceCuanto(sync.ult)+
+      (sync.remotoDev ? ' · último cambio desde '+sync.remotoDev+' '+haceCuanto(sync.remotoAt) : '');
+    var c=el('syncConflicto');
+    c.hidden=!syncConflicto;
+    if(syncConflicto){
+      el('syncConfTxt').textContent = syncConflicto.inicial
+        ? 'En la nube ya hay datos (último cambio desde '+(syncConflicto.dev||'otro dispositivo')+', '+haceCuanto(syncConflicto.at)+') y este dispositivo también tiene los suyos. ¿Con cuáles te quedás?'
+        : 'Cambiaste cosas acá y también en '+(syncConflicto.dev||'otro dispositivo')+' ('+haceCuanto(syncConflicto.at)+'). ¿Con cuáles te quedás?';
+    }
+    var hayDescarte=false; try{ hayDescarte=!!localStorage.getItem(SYNC_DESCARTE); }catch(e){}
+    el('syncDescarte').hidden=!hayDescarte;
+  }
+  function descargarDescartado(){
+    try{
+      var d=JSON.parse(localStorage.getItem(SYNC_DESCARTE));
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob([JSON.stringify(d.estado,null,2)],{type:'application/json'}));
+      a.download='my-money-version-descartada-'+new Date(d.at).toISOString().slice(0,10)+'.json';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },0);
+    }catch(e){ setStatus('No hay una versión descartada para descargar.'); }
+  }
+
+  el('syncGen').addEventListener('click', function(){ el('syncFrase').value=generarFrase(); el('syncFrase').select(); ponerAviso('Anotá esta frase en un lugar seguro: la vas a necesitar en tu otro dispositivo.'); });
+  el('syncCon').addEventListener('click', function(){ conectar(el('syncFrase').value); });
+  el('syncFrase').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); conectar(el('syncFrase').value); } });
+  el('syncAhora').addEventListener('click', function(){ if(sync && sync.pend) subir(); else bajar(); });
+  el('syncDes').addEventListener('click', function(){
+    var b=el('syncDes');
+    if(!b.dataset.ok){ b.dataset.ok='1'; b.textContent='¿Seguro? Tocá de nuevo'; return; }
+    delete b.dataset.ok; b.textContent='Desconectar este dispositivo'; desconectar();
+  });
+  el('syncUsarLocal').addEventListener('click', elegirLocal);
+  el('syncUsarNube').addEventListener('click', elegirNube);
+  el('syncDescarte').addEventListener('click', descargarDescartado);
+  el('syncChip').addEventListener('click', function(){ document.querySelector('.tab[data-p=hoy]').click(); setTimeout(function(){ el('syncCard').scrollIntoView({behavior:'smooth', block:'center'}); }, 60); });
+
+  // cuándo sincronizar: al abrir, al volver a la app, al recuperar la conexión y antes de salir
+  document.addEventListener('visibilitychange', function(){
+    if(!sync) return;
+    if(document.visibilityState==='visible') bajar();
+    else if(sync.pend){ clearTimeout(syncTimer); subir(); }
+  });
+  window.addEventListener('online', function(){ if(sync){ if(sync.pend) subir(); else bajar(); } });
+  window.addEventListener('offline', function(){ if(sync) ponerEstado('offline'); });
+  setInterval(function(){ if(sync && !document.hidden) renderSync(); }, 30000); // refrescar el "hace X min"
+
+  function iniciarSync(){
+    cargarMeta();
+    if(sync){ ponerEstado(sync.pend?'pendiente':'ok'); bajar(); }
+    else renderSync();
   }
 
   // ============ INIT ============
@@ -1846,6 +2074,33 @@
       setStatus('Respaldo descargado.');
     }catch(e){ setStatus('No se pudo descargar.'); }
   }
+  // completa y repara un estado completo (respaldo restaurado o datos que llegan de la nube)
+  function normalizarEstado(d){
+    // respaldos viejos no traen perfil: conservar el que ya está cargado
+    if(!d.perfil && st.perfil) d.perfil=clon(st.perfil);
+    Object.keys(BASE).forEach(function(k){ if(d[k]===undefined||d[k]===null) d[k]=clon(BASE[k]); });
+    // reparar sub-objetos incompletos (respaldos viejos incompletos)
+    if(typeof d.deudas!=='object'||!d.deudas) d.deudas=clon(BASE.deudas);
+    Object.keys(BASE.deudas).forEach(function(k){ if(d.deudas[k]===undefined||d.deudas[k]===null) d.deudas[k]=BASE.deudas[k]; });
+    if(!d.aporte || d.aporte<=0) d.aporte=BASE.aporte;
+    if(typeof d.ing!=='object'||!d.ing) d.ing=clon(BASE.ing);
+    if(!Array.isArray(d.grupos)||!d.grupos.length) d.grupos=clon(BASE.grupos);
+    if(!Array.isArray(d.ahorros)) d.ahorros=clon(BASE.ahorros);
+    if(!Array.isArray(d.todos)) d.todos=clon(BASE.todos);
+    if(!d.todos.some(function(t){ return t.id==='t15'; })){
+      var b15=BASE.todos.filter(function(t){return t.id==='t15';})[0];
+      if(b15) d.todos.push(clon(b15));
+    }
+    if(!Array.isArray(d.movs)) d.movs=[];
+    if(!Array.isArray(d.extras)) d.extras=[];
+    if(!Array.isArray(d.hist)) d.hist=[];
+    // limpiar el campo 'real' viejo de las categorías
+    (d.grupos||[]).forEach(function(g){ if(!g.t) g.t=g.nm||'Grupo'; (g.items||[]).forEach(function(i){ delete i.real; }); });
+    // saneamiento completo: categorías, reubicación y deduplicación
+    d = sanearDatos(d);
+    return d;
+  }
+
   function importar(file){
     var r=new FileReader();
     r.onload=function(){
@@ -1859,28 +2114,7 @@
           setStatus('Perfil cargado.');
           return;
         }
-        // respaldos viejos no traen perfil: conservar el que ya está cargado
-        if(!d.perfil && st.perfil) d.perfil=clon(st.perfil);
-        Object.keys(BASE).forEach(function(k){ if(d[k]===undefined||d[k]===null) d[k]=clon(BASE[k]); });
-        // reparar sub-objetos incompletos (respaldos viejos incompletos)
-        if(typeof d.deudas!=='object'||!d.deudas) d.deudas=clon(BASE.deudas);
-        Object.keys(BASE.deudas).forEach(function(k){ if(d.deudas[k]===undefined||d.deudas[k]===null) d.deudas[k]=BASE.deudas[k]; });
-        if(!d.aporte || d.aporte<=0) d.aporte=BASE.aporte;
-        if(typeof d.ing!=='object'||!d.ing) d.ing=clon(BASE.ing);
-        if(!Array.isArray(d.grupos)||!d.grupos.length) d.grupos=clon(BASE.grupos);
-        if(!Array.isArray(d.ahorros)) d.ahorros=clon(BASE.ahorros);
-        if(!Array.isArray(d.todos)) d.todos=clon(BASE.todos);
-        if(!d.todos.some(function(t){ return t.id==='t15'; })){
-          var b15=BASE.todos.filter(function(t){return t.id==='t15';})[0];
-          if(b15) d.todos.push(clon(b15));
-        }
-        if(!Array.isArray(d.movs)) d.movs=[];
-        if(!Array.isArray(d.extras)) d.extras=[];
-        if(!Array.isArray(d.hist)) d.hist=[];
-        // limpiar el campo 'real' viejo de las categorías
-        (d.grupos||[]).forEach(function(g){ if(!g.t) g.t=g.nm||'Grupo'; (g.items||[]).forEach(function(i){ delete i.real; }); });
-        // saneamiento completo: categorías, reubicación y deduplicación
-        d = sanearDatos(d);
+        d = normalizarEstado(d);
         st=d; renderAll(); guardar();
         setStatus('Respaldo restaurado y ordenado.');
       }catch(e){ setStatus('El archivo no se pudo leer.'); }
@@ -1949,16 +2183,11 @@
     var activa=document.querySelector('.tab[aria-selected="true"]');
     entrarPanel(activa ? activa.dataset.p : 'hoy');
     contarDesdeCero(el('kSaldo').parentNode.parentNode);
+    iniciarSync();
   });
 
-  // ---- PWA: service worker para que abra sin conexión ----
-  if('serviceWorker' in navigator){
-    var swCode = "self.addEventListener('install',function(e){self.skipWaiting();});"+
-      "self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim());});"+
-      "self.addEventListener('fetch',function(e){e.respondWith(fetch(e.request).catch(function(){return caches.match(e.request);}));});";
-    try{
-      var blob=new Blob([swCode],{type:'application/javascript'});
-      navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(function(){});
-    }catch(e){}
+  // ---- PWA: service worker para que abra sin conexión (sw.js) ----
+  if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='127.0.0.1' || location.hostname==='localhost')){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
   }
 })();

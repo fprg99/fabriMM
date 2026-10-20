@@ -1,0 +1,9 @@
+{
+  "name": "my-money-sync",
+  "private": true,
+  "type": "module",
+  "description": "Sincronización cifrada de My Money (Vercel Functions + Vercel Blob privado)",
+  "dependencies": {
+    "@vercel/blob": "2.8.0"
+  }
+}

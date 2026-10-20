@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -20,6 +20,7 @@
 
   <div class="top">
     <div class="brand"><span class="brand-logo" aria-hidden="true">M</span><span class="brand-nm">My Money</span></div>
+    <button class="sync-chip" id="syncChip" type="button" hidden><i aria-hidden="true"></i><span>Sincronizado</span></button>
     <div class="strip">
       <div class="kpi"><div class="k">Saldo en cuenta</div><div class="v" id="kSaldo">—</div></div>
       <div class="kpi"><div class="k">Gastar hoy</div><div class="v ok" id="kHoy">—</div></div>
@@ -129,6 +130,28 @@
       <button class="ghost" id="impBtn">Restaurar respaldo</button>
       <input type="file" id="impFile" accept="application/json" hidden>
     </div>
+
+    <h2>Sincronizar entre dispositivos</h2>
+    <p class="sub-t">Usá la app en la compu y en el teléfono con los mismos datos. Se cifran en este dispositivo con tu frase antes de subir: en la nube nadie puede leerlos.</p>
+    <div class="card sync-card" id="syncCard">
+      <div id="syncOff">
+        <label class="sync-lbl" for="syncFrase">Tu frase de sincronización</label>
+        <input class="desc sync-frase" id="syncFrase" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ej: k7qm-2xpd-9fhw-tc4r-bn8e">
+        <div class="sync-btns"><button id="syncCon">Conectar este dispositivo</button><button class="ghost" id="syncGen" type="button">Generar una frase segura</button></div>
+        <div class="sync-msg" id="syncMsg" hidden></div>
+        <p class="sync-nota">En el primer dispositivo generá una frase y conectalo. En el otro, escribí la misma frase. <b>Guardala en un lugar seguro:</b> si la perdés no hay forma de recuperar lo que está en la nube (lo de cada dispositivo sigue ahí).</p>
+      </div>
+      <div id="syncOn" hidden>
+        <div class="sync-top"><span class="sync-estado" id="syncEstado">—</span><button class="ghost" id="syncAhora" type="button">Sincronizar ahora</button></div>
+        <div class="sync-det" id="syncDetalle">—</div>
+        <div class="sync-conf" id="syncConflicto" hidden>
+          <p id="syncConfTxt"></p>
+          <div class="sync-btns"><button id="syncUsarNube">Usar los de la nube</button><button class="ghost" id="syncUsarLocal">Quedarme con los de este dispositivo</button></div>
+          <p class="sync-nota">La versión que no elijas se guarda en este dispositivo por si la necesitás.</p>
+        </div>
+        <div class="sync-btns"><button class="ghost" id="syncDescarte" type="button" hidden>Descargar la versión descartada</button><button class="ghost danger" id="syncDes" type="button">Desconectar este dispositivo</button></div>
+      </div>
+    </div>
     </div>
   </div>
 
@@ -233,7 +256,7 @@
 
     <details id="editDeudas" style="margin-top:18px">
       <summary>Editar tus deudas</summary>
-      <p class="sub-t" style="margin-top:8px">Agregá, cambiá o borrá tarjetas y préstamos. Las tasas van en % anual. Todo queda guardado solo en este dispositivo.</p>
+      <p class="sub-t" style="margin-top:8px">Agregá, cambiá o borrá tarjetas y préstamos. Las tasas van en % anual. Se guarda junto con el resto de tus datos.</p>
       <div id="deudaEditor"></div>
       <div class="card" style="margin-top:12px">
         <div class="addbar" style="border-top:none">
@@ -261,8 +284,8 @@
   </div>
 
   <footer>
-    Tus datos se guardan solo en este dispositivo. Todo se guarda solo. Herramienta de cálculo sobre tus propios datos, no asesoramiento financiero profesional.
+    Tus datos se guardan en este dispositivo y, si activás la sincronización, también en la nube, cifrados con tu frase. Herramienta de cálculo sobre tus propios datos, no asesoramiento financiero profesional.
   </footer>
 </div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>

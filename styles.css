@@ -531,3 +531,33 @@
     .chart-key i{transition:transform .25s var(--ease)}
     .cat{transition:background .2s ease, box-shadow .2s ease}
   }
+
+  /* ---------- sincronización ---------- */
+  .sync-card{padding:16px}
+  .sync-lbl{font-size:12.5px;font-weight:600;display:block;margin-bottom:6px}
+  input.sync-frase{margin-top:0;font-family:var(--data);font-size:14px;letter-spacing:.04em}
+  .sync-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .sync-msg{margin-top:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--mustard-soft);color:#6B4B05;font-size:12.5px;line-height:1.45}
+  .sync-nota{font-size:11.5px;color:var(--ink-soft);margin:10px 0 0;line-height:1.45}
+  .sync-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .sync-estado{font-family:var(--display);font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+  .sync-estado::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--ink-soft)}
+  .sync-estado.ok::before{background:var(--moss)} .sync-estado.bad::before{background:var(--brick)}
+  .sync-estado.run::before{background:var(--mustard)} .sync-estado.off::before{background:#A9B0AA}
+  .sync-det{font-size:12px;color:var(--ink-soft);margin-top:4px}
+  .sync-conf{margin-top:12px;padding:12px;border-radius:var(--r-md);background:var(--brick-soft)}
+  .sync-conf p{margin:0;font-size:13px;color:#5E1F14;line-height:1.45}
+  .sync-conf .sync-nota{color:#7A3A2E}
+
+  /* indicador en la barra */
+  .sync-chip{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;margin:0 0 10px;padding:5px 11px;border-radius:999px;
+             border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--on-deep);font-size:11.5px;font-weight:500}
+  .sync-chip:hover{background:rgba(255,255,255,.12)}
+  .sync-chip i{width:8px;height:8px;border-radius:50%;background:var(--on-deep-soft)}
+  .sync-chip.ok i{background:var(--mint)} .sync-chip.bad i{background:var(--bad-l)} .sync-chip.run i{background:var(--warn-l)}
+  .sync-chip[hidden]{display:none}
+  @media (min-width:1024px){ .sync-chip{order:1;margin:-6px 8px 0} }
+  @media (prefers-reduced-motion:no-preference){
+    @keyframes latido{0%,100%{opacity:1}50%{opacity:.35}}
+    .sync-chip.run i,.sync-estado.run::before{animation:latido 1.1s ease-in-out infinite}
+  }

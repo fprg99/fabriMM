@@ -1,0 +1,3 @@
+sync-api/.vercel
+sync-api/node_modules
+sync-api/.env*
