@@ -90,8 +90,13 @@ export async function GET(req) {
     const quien = await permiso(idDe(req));
     if (quien === 'no') return ajeno(req);
     if (quien === 'libre') return json(req, 404, { error: 'no existe' }); // sin dueño todavía no hay datos
-    const r = await get(p, { access: 'private', useCache: false, ifNoneMatch: limpiar(req.headers.get('if-none-match')) || undefined });
+    // La versión que ya tiene el dispositivo puede venir en ?tengo= (app nueva) o en If-None-Match (app vieja).
+    // Vercel quita las cabeceras CORS de las respuestas 304 y Firefox las rechaza; por eso, a la app
+    // nueva se le contesta "sin cambios" con un 200 corto, que conserva las cabeceras.
+    const tengo = new URL(req.url).searchParams.get('tengo');
+    const r = await get(p, { access: 'private', useCache: false, ifNoneMatch: limpiar(tengo || req.headers.get('if-none-match')) || undefined });
     if (!r) return json(req, 404, { error: 'no existe' });
+    if (r.statusCode === 304 && tengo) return json(req, 200, { sinCambios: true }, version(r.blob.etag));
     if (r.statusCode === 304) return new Response(null, { status: 304, headers: cabeceras(req, version(r.blob.etag)) });
     const cuerpo = await new Response(r.stream).text();
     return new Response(cuerpo, { status: 200, headers: cabeceras(req, { 'Content-Type': 'application/json', ...version(r.blob.etag) }) });

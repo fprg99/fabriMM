@@ -1722,10 +1722,10 @@
     return (u && u.mes===mes) ? u : {mes:mes, sub:0, baj:0};
   }
   // cada pedido real al servicio pasa por acá y queda contado
-  function syncFetch(tipo, opts){
+  function syncFetch(tipo, opts, extra){
     var u=leerUso(); u[tipo]++; try{ localStorage.setItem(SYNC_USO, JSON.stringify(u)); }catch(e){}
     if(tipo==='baj') sync.ultBaj=Date.now();
-    return fetch(SYNC_URL+'?id='+sync.id, opts);
+    return fetch(SYNC_URL+'?id='+sync.id+(extra||''), opts);
   }
   async function hashEstado(){
     var d=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(st)));
@@ -1790,14 +1790,18 @@
     if(!navigator.onLine){ ponerEstado('offline'); return; }
     syncEnCurso=true; if(syncEstado!=='conflicto') ponerEstado('bajando');
     try{
-      var h={}; if(sync.etag && !trasRechazo) h['If-None-Match']=sync.etag;
-      var r=await syncFetch('baj', {headers:h, cache:'no-store'});
+      // la versión que ya tenemos va en la dirección (no en una cabecera): así el pedido no necesita
+      // verificación previa y el servidor contesta "sin cambios" con un 200 que Firefox acepta
+      var tengo = (sync.etag && !trasRechazo) ? '&tengo='+encodeURIComponent(sync.etag) : '';
+      var r=await syncFetch('baj', {cache:'no-store'}, tengo);
       syncEnCurso=false;
       if(r.status===403){ ponerEstado('ajeno'); return; }
       if(r.status===304){ exito(); sync.ult=Date.now(); guardarMeta(); if(sync.pend) subir(); else ponerEstado('ok'); return; }
       if(r.status===404){ sync.etag=null; guardarMeta(); subir(); return; } // nube vacía: subir lo de acá
       if(!r.ok) throw new Error('HTTP '+r.status);
-      var etag=r.headers.get('ETag'), p=await r.json(), remoto=await descifrar(p);
+      var etag=r.headers.get('ETag'), p=await r.json();
+      if(p && p.sinCambios){ exito(); sync.ult=Date.now(); guardarMeta(); if(sync.pend) subir(); else ponerEstado('ok'); return; }
+      var remoto=await descifrar(p);
       if(sync.pend || trasRechazo){
         syncConflicto={estado:remoto, etag:etag, at:p.at, dev:p.dev};
         ponerEstado('conflicto');
