@@ -1676,8 +1676,14 @@
   // El servidor solo guarda texto cifrado bajo un id que también sale de la frase:
   // sin la frase, nadie (ni el servidor) puede leer tus números.
   var SYNC_URL = 'https://my-money-sync.vercel.app/api/sync';
+  // solo para pruebas en la compu: permite apuntar a un servidor de sincronización local
+  try{ if(/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && localStorage.getItem('mm-sync:url')) SYNC_URL=localStorage.getItem('mm-sync:url'); }catch(e){}
   var SYNC_KEY = 'mm-sync:v1';      // {id, k, etag, pend, ult, remotoAt, remotoDev}
   var SYNC_DESCARTE = 'mm-sync:descartado';
+  var SYNC_USO = 'mm-sync:uso';      // {mes, sub, baj}: lo que gastó ESTE dispositivo del cupo de Vercel
+  var CUPO_SUB = 2000, CUPO_BAJ = 10000; // plan gratuito de Vercel Blob, por mes y entre todos los dispositivos
+  var ESPERA_MS = 8000, ESPERA_MAX_MS = 60000, ENTRE_CONSULTAS_MS = 30000;
+  var syncPrimerCambio = 0;
   var sync = null, syncClave = null, syncEstado = 'off', syncConflicto = null, syncAplicando = false, syncTimer = null, syncEnCurso = false;
 
   var b64 = function(buf){ var s='', b=new Uint8Array(buf); for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s); };
@@ -1710,6 +1716,21 @@
     var pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:deB64(p.iv)}, await claveAes(), deB64(p.ct));
     return JSON.parse(new TextDecoder().decode(pt));
   }
+  function leerUso(){
+    var mes=new Date().toISOString().slice(0,7), u=null;
+    try{ u=JSON.parse(localStorage.getItem(SYNC_USO)||'null'); }catch(e){}
+    return (u && u.mes===mes) ? u : {mes:mes, sub:0, baj:0};
+  }
+  // cada pedido real al servicio pasa por acá y queda contado
+  function syncFetch(tipo, opts){
+    var u=leerUso(); u[tipo]++; try{ localStorage.setItem(SYNC_USO, JSON.stringify(u)); }catch(e){}
+    if(tipo==='baj') sync.ultBaj=Date.now();
+    return fetch(SYNC_URL+'?id='+sync.id, opts);
+  }
+  async function hashEstado(){
+    var d=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(st)));
+    return hex(new Uint8Array(d));
+  }
   function guardarMeta(){ try{ if(sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }catch(e){} }
   function cargarMeta(){ try{ var m=JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); if(m && m.id && m.k) sync=m; }catch(e){} }
   function tieneDatosPropios(){ return (st.movs||[]).length>0 || (PERFIL && !PERFIL.demo && DEUDAS_META.length>0); }
@@ -1720,7 +1741,9 @@
   function syncMarcarCambio(){
     if(!sync || syncAplicando) return;
     sync.pend=true; guardarMeta();
-    clearTimeout(syncTimer); syncTimer=setTimeout(subir, 2500);
+    // espera a que dejes de tocar (8 s), pero nunca más de 1 minuto desde el primer cambio
+    var ahora=Date.now(); if(!syncPrimerCambio) syncPrimerCambio=ahora;
+    clearTimeout(syncTimer); syncTimer=setTimeout(subir, Math.min(ESPERA_MS, Math.max(0, syncPrimerCambio+ESPERA_MAX_MS-ahora)));
     if(syncEstado!=='conflicto') ponerEstado('pendiente');
   }
 
@@ -1728,16 +1751,22 @@
     if(!sync || syncEnCurso) return;
     if(syncConflicto && forzarEtag===undefined) return; // esperar a que elijas
     if(!navigator.onLine){ ponerEstado('offline'); return; }
-    syncEnCurso=true; ponerEstado('subiendo');
+    clearTimeout(syncTimer); syncPrimerCambio=0;
+    syncEnCurso=true;
     try{
+      // si el contenido es igual a lo último que se subió, no gastar una subida
+      var h0=await hashEstado();
+      if(forzarEtag===undefined && sync.etag && h0===sync.hash){ sync.pend=false; guardarMeta(); syncEnCurso=false; ponerEstado('ok'); return; }
+      ponerEstado('subiendo');
       var etag = forzarEtag!==undefined ? forzarEtag : sync.etag;
       var h={'Content-Type':'application/json'}; if(etag) h['If-Match']=etag;
       var cuerpo=JSON.stringify(await cifrar(st));
       // keepalive deja terminar la subida aunque cierres la app, pero solo acepta cuerpos chicos
-      var r=await fetch(SYNC_URL+'?id='+sync.id, {method:'PUT', headers:h, body:cuerpo, keepalive:cuerpo.length<60000});
+      var r=await syncFetch('sub', {method:'PUT', headers:h, body:cuerpo, keepalive:cuerpo.length<60000});
+      if(r.status===403){ syncEnCurso=false; ponerEstado('ajeno'); return; }
       if(r.status===412){ syncEnCurso=false; await bajar(true); return; }
       if(!r.ok) throw new Error('HTTP '+r.status);
-      sync.etag=r.headers.get('ETag'); sync.pend=false; sync.ult=Date.now(); sync.remotoDev=nombreDispositivo(); sync.remotoAt=sync.ult;
+      sync.etag=r.headers.get('ETag'); sync.hash=h0; sync.pend=false; sync.ult=Date.now(); sync.remotoDev=nombreDispositivo(); sync.remotoAt=sync.ult;
       guardarMeta(); syncConflicto=null; ponerEstado('ok');
     }catch(e){ ponerEstado(navigator.onLine?'error':'offline'); }
     syncEnCurso=false;
@@ -1750,8 +1779,9 @@
     syncEnCurso=true; if(syncEstado!=='conflicto') ponerEstado('bajando');
     try{
       var h={}; if(sync.etag && !trasRechazo) h['If-None-Match']=sync.etag;
-      var r=await fetch(SYNC_URL+'?id='+sync.id, {headers:h, cache:'no-store'});
+      var r=await syncFetch('baj', {headers:h, cache:'no-store'});
       syncEnCurso=false;
+      if(r.status===403){ ponerEstado('ajeno'); return; }
       if(r.status===304){ sync.ult=Date.now(); guardarMeta(); if(sync.pend) subir(); else ponerEstado('ok'); return; }
       if(r.status===404){ sync.etag=null; guardarMeta(); subir(); return; } // nube vacía: subir lo de acá
       if(!r.ok) throw new Error('HTTP '+r.status);
@@ -1772,6 +1802,7 @@
       sync.etag=etag; sync.pend=false; sync.ult=Date.now();
       if(p){ sync.remotoAt=p.at; sync.remotoDev=p.dev; }
       guardarMeta(); renderAll(); guardar();
+      hashEstado().then(function(h){ if(sync){ sync.hash=h; guardarMeta(); } });
     } finally { syncAplicando=false; }
     syncConflicto=null; ponerEstado('ok');
   }
@@ -1786,7 +1817,12 @@
     try{
       var d=await derivar(f);
       sync={id:d.id, k:d.k, etag:null, pend:false, ult:null, remotoAt:null, remotoDev:null}; syncClave=null;
-      var r=await fetch(SYNC_URL+'?id='+sync.id, {cache:'no-store'});
+      var r=await syncFetch('baj', {cache:'no-store'});
+      if(r.status===403){
+        sync=null; syncClave=null; guardarMeta(); ponerEstado('off');
+        ponerAviso('El servicio de sincronización ya está registrado con otra frase. Usá la misma frase que en tu otro dispositivo.');
+        return;
+      }
       if(r.status===404){ guardarMeta(); await subir(); setStatus('Listo: este dispositivo subió tus datos a la nube.'); return; }
       if(!r.ok) throw new Error('HTTP '+r.status);
       var etag=r.headers.get('ETag'), p=await r.json(), remoto=await descifrar(p);
@@ -1834,7 +1870,8 @@
   var SYNC_TXT = {
     off:['','Sin sincronizar'], conectando:['run','Conectando…'], subiendo:['run','Sincronizando…'], bajando:['run','Sincronizando…'],
     pendiente:['run','Cambios por subir'], ok:['ok','Sincronizado'], offline:['off','Sin conexión · se sube al volver'],
-    error:['bad','No se pudo sincronizar'], conflicto:['bad','Elegí qué datos conservar']
+    error:['bad','No se pudo sincronizar'], conflicto:['bad','Elegí qué datos conservar'],
+    ajeno:['bad','El servicio no reconoce esta frase']
   };
   function renderSync(){
     var activo=!!sync, t=SYNC_TXT[syncEstado]||SYNC_TXT.off;
@@ -1847,6 +1884,10 @@
     el('syncEstado').textContent=t[1];
     el('syncDetalle').textContent = 'Última sincronización: '+haceCuanto(sync.ult)+
       (sync.remotoDev ? ' · último cambio desde '+sync.remotoDev+' '+haceCuanto(sync.remotoAt) : '');
+    var u=leerUso(), pct=Math.min(100, u.sub/CUPO_SUB*100);
+    el('syncUsoTxt').innerHTML='Este mes, desde este dispositivo: <b>'+gs(u.sub)+'</b> '+(u.sub===1?'subida':'subidas')+' y <b>'+gs(u.baj)+'</b> '+(u.baj===1?'consulta':'consultas')+'.';
+    el('syncUsoBar').style.width=Math.max(pct, u.sub?1.5:0)+'%';
+    el('syncUsoBar').className = pct>75 ? 'over' : pct>50 ? 'mid' : '';
     var c=el('syncConflicto');
     c.hidden=!syncConflicto;
     if(syncConflicto){
@@ -1885,7 +1926,8 @@
   // cuándo sincronizar: al abrir, al volver a la app, al recuperar la conexión y antes de salir
   document.addEventListener('visibilitychange', function(){
     if(!sync) return;
-    if(document.visibilityState==='visible') bajar();
+    // al volver a la app consultar, pero no más de una vez cada 30 s (cada consulta cuenta en el cupo)
+    if(document.visibilityState==='visible'){ if(Date.now()-(sync.ultBaj||0)>ENTRE_CONSULTAS_MS) bajar(); }
     else if(sync.pend){ clearTimeout(syncTimer); subir(); }
   });
   window.addEventListener('online', function(){ if(sync){ if(sync.pend) subir(); else bajar(); } });

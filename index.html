@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -144,6 +144,11 @@
       <div id="syncOn" hidden>
         <div class="sync-top"><span class="sync-estado" id="syncEstado">—</span><button class="ghost" id="syncAhora" type="button">Sincronizar ahora</button></div>
         <div class="sync-det" id="syncDetalle">—</div>
+        <div class="sync-uso">
+          <div class="sync-uso-txt" id="syncUsoTxt">—</div>
+          <div class="bar"><div id="syncUsoBar" style="width:0%"></div></div>
+          <div class="sync-nota" style="margin-top:6px">La barra es la parte del cupo gratis de subidas que usó este dispositivo (2.000 por mes entre todos; las consultas tienen 10.000). El total oficial está en Vercel → Usage. Si se llega al tope, la app sigue funcionando y solo se pausa la sincronización.</div>
+        </div>
         <div class="sync-conf" id="syncConflicto" hidden>
           <p id="syncConfTxt"></p>
           <div class="sync-btns"><button id="syncUsarNube">Usar los de la nube</button><button class="ghost" id="syncUsarLocal">Quedarme con los de este dispositivo</button></div>
@@ -288,4 +293,4 @@
   </footer>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
