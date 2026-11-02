@@ -1416,7 +1416,7 @@
       host.innerHTML='<div class="card empty">Todavía no hay meses cerrados. Cuando cierres tu primer ciclo, la foto va a aparecer acá.</div>';
       return;
     }
-    host.innerHTML=h.map(function(m){
+    host.innerHTML=h.map(function(m, idx){
       // comparación presupuesto vs gasto real
       var tienePpto = m.presupuestado!==undefined && m.presupuestado>0;
       var dif = tienePpto ? m.gastos - m.presupuestado : 0;
@@ -1450,8 +1450,178 @@
           :
           '<div class="hist-grid"><div><div class="hist-k">Deuda al cerrar</div><div class="hist-v num">'+gs(m.deudaTotal)+'</div></div></div>'
         )+
+        '<details class="inf"'+(idx===0?' open':'')+'><summary>'+(idx===0?'Informe del mes':'Ver informe del mes')+'</summary>'+htmlInforme(informeMes(m, h[idx+1]))+'</details>'+
         '</div>';
     }).join('');
+    host.querySelectorAll('.inf-hacer').forEach(function(b){
+      b.addEventListener('click', function(){
+        var v=pn(b.dataset.aporte); if(!v) return;
+        st.aporte=v; renderAll(); guardar(); setStatus('Listo: el dinero extra a la deuda quedó en '+gs(v)+' por mes.');
+      });
+    });
+  }
+
+  // ============ INFORME DEL MES ============
+  // Análisis automático de un mes cerrado: veredicto, adónde fue la plata, cómo bajó la deuda,
+  // observaciones y recomendaciones. Son reglas sobre tus propios números, calculadas acá.
+  function informeMes(m, prev){
+    var r={obs:[], rec:[]};
+    var ing=m.ingreso||0, gas=m.gastos||0, deu=m.pagosDeuda||0, aho=m.ahorro||0;
+    var sobro=ing-gas-deu-aho;
+    r.reparto = ing>0 ? {gastos:gas, deuda:deu, ahorro:aho, sobro:Math.max(0,sobro), ing:ing} : null;
+    var ppto=m.presupuestado||0, dif=gas-ppto;
+
+    // veredicto
+    if(ppto>0 && dif>ppto*0.1) r.veredicto={cls:'bad', t:'Mes pasado de presupuesto', s:'Gastaste '+gs(dif)+' más de lo planeado ('+Math.round(dif/ppto*100)+'% arriba).'};
+    else if(ppto>0 && dif>0) r.veredicto={cls:'warn', t:'Casi en el presupuesto', s:'Te pasaste '+gs(dif)+', menos del 10%.'};
+    else if(ppto>0) r.veredicto={cls:'ok', t:'Mes en orden', s:'Gastaste '+gs(-dif)+' menos de lo planeado.'};
+    else r.veredicto={cls:'', t:'Resumen del mes', s:'Este mes no tenía metas cargadas para comparar.'};
+
+    // categorías contra su meta
+    var cats=[];
+    if(m.porCat){
+      var ids={}; Object.keys(m.porCat).forEach(function(k){ ids[k]=1; });
+      if(m.metas) Object.keys(m.metas).forEach(function(k){ if(m.metas[k]>0 && (!m.grupoCat || m.grupoCat[k]!=='ahorro')) ids[k]=1; });
+      cats=Object.keys(ids).map(function(k){
+        return {id:k, nm:(m.nombres&&m.nombres[k])||nombreCat(k), real:m.porCat[k]||0, meta:(m.metas&&m.metas[k])||0,
+                n:(m.cuentaCat&&m.cuentaCat[k])||0, grupo:m.grupoCat&&m.grupoCat[k]};
+      }).filter(function(c){ return c.real>0 || c.meta>0; })
+        .sort(function(a,b){ return (b.real-b.meta)-(a.real-a.meta); });
+    }
+    r.cats=cats; r.tieneMetas=!!m.metas;
+
+    // deuda: cuánto pagaste a tarjetas y cuánto bajó de verdad su saldo
+    var dIni=m.deudasInicio, dFin=m.deudasCierre, tipos=m.tipoDeuda||{}, pag=m.pagosPorDeuda||{};
+    if(dFin){
+      var pagT=0, finT=0, iniT=null;
+      Object.keys(dFin).forEach(function(id){ if(tipos[id]!=='prestamo'){ finT+=dFin[id]; pagT+=pag[id]||0; } });
+      if(dIni){ iniT=0; Object.keys(dFin).forEach(function(id){ if(tipos[id]!=='prestamo') iniT+=(dIni[id]!==undefined?dIni[id]:dFin[id]); }); }
+      else if(m.deudaInicial){
+        // sin foto al empezar: préstamos al empezar = al cerrar + las cuotas que pagaste
+        var presIni=0; Object.keys(dFin).forEach(function(id){ if(tipos[id]==='prestamo') presIni+=dFin[id]+(pag[id]||0); });
+        iniT=Math.max(0, m.deudaInicial-presIni);
+      }
+      r.tarjetas={pagado:pagT, ini:iniT, fin:finT, bajo:iniT!==null?iniT-finT:null};
+    }
+    r.deuda={ini:m.deudaInicial||null, fin:m.deudaTotal||0, bajo:m.deudaInicial?m.deudaInicial-m.deudaTotal:null};
+
+    // ---- observaciones ----
+    var peor=cats.filter(function(c){ return c.meta>0 && c.real>c.meta && c.grupo!=='ahorro'; })[0];
+    if(peor){
+      r.obs.push({cls:'bad', t:peor.nm+' fue lo que más se pasó',
+        x:gs(peor.real)+' contra una meta de '+gs(peor.meta)+' (+'+gs(peor.real-peor.meta)+')'+(peor.n>1?', en '+peor.n+' movimientos de ~'+gs(redondear(peor.real/peor.n,1000))+' cada uno':'')+'.'});
+    }
+    var sinMeta=cats.filter(function(c){ return !(c.meta>0) && c.real>0; });
+    if(sinMeta.length && r.tieneMetas){
+      r.obs.push({cls:'warn', t:'Gastos sin meta', x:sinMeta.map(function(c){ return c.nm+' ('+gs(c.real)+')'; }).join(', ')+'. Lo que no tiene meta se escapa sin que lo veas.'});
+    }
+    if(r.tarjetas && r.tarjetas.pagado>0 && r.tarjetas.bajo!==null){
+      var ef=r.tarjetas.bajo/r.tarjetas.pagado;
+      if(ef<0.5) r.obs.push({cls:'bad', t:'Las tarjetas casi no bajaron',
+        x:'Les pagaste '+gs(r.tarjetas.pagado)+' pero el saldo bajó '+(r.tarjetas.bajo>0?'solo '+gs(r.tarjetas.bajo)+' ('+Math.round(ef*100)+'%)':'nada')+'. El resto se fue en compras nuevas, intereses y cargos.'});
+      else r.obs.push({cls:'ok', t:'Los pagos a tarjetas rindieron', x:'Pagaste '+gs(r.tarjetas.pagado)+' y el saldo bajó '+gs(r.tarjetas.bajo)+' ('+Math.round(ef*100)+'%).'});
+    }
+    if(r.deuda.bajo!==null){
+      if(r.deuda.bajo>0) r.obs.push({cls:'ok', t:'La deuda bajó '+gs(r.deuda.bajo), x:'De '+gs(r.deuda.ini)+' a '+gs(r.deuda.fin)+'.'+(prev && prev.deudaInicial && prev.deudaInicial-prev.deudaTotal>r.deuda.bajo*1.2?' El mes anterior había bajado '+gs(prev.deudaInicial-prev.deudaTotal)+'.':'')});
+      else r.obs.push({cls:'bad', t:'La deuda no bajó', x:'Empezaste con '+gs(r.deuda.ini)+' y cerraste con '+gs(r.deuda.fin)+'.'});
+    }
+    var bien=cats.filter(function(c){ return c.meta>=100000 && c.real<c.meta*0.6 && c.grupo==='var'; });
+    if(bien.length) r.obs.push({cls:'ok', t:'Lo que hiciste bien', x:bien.map(function(c){ return c.nm+' ('+gs(c.real)+' de '+gs(c.meta)+')'; }).join(', ')+'.'});
+    if(ing>0 && sobro<0) r.obs.push({cls:'bad', t:'Salió más de lo que entró', x:'Entre gastos y deuda usaste '+gs(-sobro)+' más que el ingreso del mes: salió del saldo que tenías guardado.'});
+    else if(ing>0 && sobro<ing*0.05) r.obs.push({cls:'warn', t:'Cerraste sin margen', x:'Sobraron '+gs(sobro)+', el '+Math.round(sobro/ing*100)+'% de lo que entró. Cualquier imprevisto termina en la tarjeta.'});
+    if(prev && prev.gastos>0){
+      var vs=gas/prev.gastos-1;
+      if(Math.abs(vs)>=0.1) r.obs.push({cls:vs>0?'warn':'ok', t:'Contra '+prev.etiqueta, x:'Gastaste '+(vs>0?Math.round(vs*100)+'% más':Math.round(-vs*100)+'% menos')+' ('+gs(gas)+' contra '+gs(prev.gastos)+').'});
+    }
+
+    // ---- recomendaciones (ordenadas por impacto) ----
+    if(peor && peor.grupo==='var'){
+      var sem=redondear(peor.meta/4.3, 10000);
+      r.rec.push({t:'Tope semanal para '+peor.nm, x:'Pensalo como <b>'+gs(sem)+' por semana</b> en vez de '+gs(peor.meta)+' por mes. El asesor de Hoy te avisa apenas la semana se pase, así lo frenás a tiempo.', tag:'~'+gs(redondear(peor.real-peor.meta,10000))+'/mes', peso:peor.real-peor.meta});
+    }
+    var obj=(m.cuotas||0)+(m.aporte||0);
+    if(m.aporte>0 && obj>0 && deu<obj*0.9){
+      var falta=obj-deu, real=Math.max(0, redondear(m.aporte-falta, 50000));
+      r.rec.push({t:'Una meta de aporte que puedas cumplir', x:'Te propusiste pagar '+gs(obj)+' de deuda y pagaste '+gs(deu)+'. Bajar el dinero extra de '+gs(m.aporte)+' a <b>'+gs(real)+'</b> (lo que de verdad pudiste) hace que el plan y la fecha de salida sean reales. Cuando sobre plata, lo subís.',
+        tag:'realista', peso:falta*0.8, aporte:real});
+    }
+    if(r.tarjetas && r.tarjetas.pagado>0 && r.tarjetas.bajo!==null && r.tarjetas.bajo<r.tarjetas.pagado*0.5){
+      r.rec.push({t:'Frená las compras con tarjeta', x:'Pagá con débito lo del día a día y sacá de la tarjeta los débitos automáticos que puedas (gym, suscripciones). Si no, cada pago se lo come el consumo nuevo.', tag:'evita intereses', peso:r.tarjetas.pagado-Math.max(0,r.tarjetas.bajo)});
+    }
+    cats.filter(function(c){ return c.meta>0 && c.real>c.meta*1.15 && c!==peor && c.grupo!=='ahorro'; }).slice(0,2).forEach(function(c){
+      var esOtros=/otros|imprevist/i.test(c.nm);
+      r.rec.push({t:esOtros?'Ordená "'+c.nm+'"':'Ajustá '+c.nm, x:esOtros
+        ? 'Se pasó '+gs(c.real-c.meta)+'. Mirá qué hay adentro: si algo se repite todos los meses (regalos, cumpleaños, eventos), dale su propia categoría con meta.'
+        : 'Se pasó '+gs(c.real-c.meta)+' ('+gs(c.real)+' de '+gs(c.meta)+'). O la meta es irreal, o hay algo para recortar: decidilo y dejala en un número que cumplas.',
+        tag:'+'+gs(redondear(c.real-c.meta,10000)), peso:c.real-c.meta});
+    });
+    if(sinMeta.length && r.tieneMetas){
+      var tot=sinMeta.reduce(function(a,c){return a+c.real;},0);
+      r.rec.push({t:'Ponele meta a todo', x:'Dale meta a '+sinMeta.map(function(c){return c.nm;}).join(', ')+' en Presupuesto, aunque sea chica. Si es algo que querés pausar (por ejemplo inversiones mientras tenés tarjetas al ~20% anual), dejala en cero a propósito.', tag:gs(redondear(tot,10000)), peso:tot*0.7});
+    }
+    var fondo=(st.ahorros||[]).filter(function(a){ return /emergencia/i.test(a.nm); })[0];
+    if((!fondo || (fondo.guardado||0)<500000) && ing>0){
+      r.rec.push({t:'Un colchón mínimo de 500 mil', x:'Cuando termines de pagar la tarjeta más chica, guardá 500 mil para imprevistos. Es lo que evita volver a la tarjeta la próxima vez que algo se rompa.', tag:'colchón', peso:50000});
+    }
+    if(ing>0 && sobro>ing*0.05 && r.deuda.fin>0){
+      r.rec.push({t:'Lo que sobró, a la deuda más cara', x:'Te sobraron '+gs(sobro)+'. Mandarlos a la tarjeta de tasa más alta rinde más que tenerlos en la cuenta.', tag:gs(redondear(sobro,10000)), peso:sobro});
+    }
+    if(ppto>0 && dif<=0 && !r.rec.length){
+      r.rec.push({t:'Seguí igual', x:'Cumpliste el presupuesto. Si se repite el mes que viene, subí un poco el dinero extra a la deuda.', tag:'bien', peso:1});
+    }
+    r.rec.sort(function(a,b){ return b.peso-a.peso; });
+    r.rec=r.rec.slice(0,6);
+    return r;
+  }
+  function nombreCat(id){ var c=todosItems().filter(function(x){return x.id===id;})[0]; return c?c.nm:id; }
+
+  function htmlInforme(r){
+    var h='<div class="inf-ver '+r.veredicto.cls+'"><b>'+esc(r.veredicto.t)+'</b><span>'+esc(r.veredicto.s)+'</span></div>';
+    if(r.reparto){
+      var p=r.reparto, pc=function(v){ return Math.round(v/p.ing*100); };
+      var seg=[['gastos','Gastos',p.gastos],['deuda','Deuda',p.deuda],['ahorro','Ahorro',p.ahorro],['sobro','Sobró',p.sobro]].filter(function(x){ return x[2]>0; });
+      h+='<div class="inf-sec">Adónde fue lo que entró ('+gs(p.ing)+')</div><div class="inf-split">'+
+        seg.map(function(x){ return '<div class="s-'+x[0]+'" style="flex:'+x[2]+'" title="'+x[1]+': '+gs(x[2])+'"></div>'; }).join('')+'</div>'+
+        '<div class="inf-ley">'+seg.map(function(x){ return '<span><i class="s-'+x[0]+'"></i>'+x[1]+' '+pc(x[2])+'%</span>'; }).join('')+'</div>';
+    }
+    if(r.cats.length){
+      var tope=Math.max.apply(null, r.cats.map(function(c){ return Math.max(c.real,c.meta); }))||1;
+      h+='<div class="inf-sec">Cada categoría contra su meta</div><div class="bars inf-bars">'+r.cats.map(function(c){
+        var over=c.meta>0 && c.real>c.meta;
+        return '<div class="brow"><div class="brow-top"><span class="n">'+esc(c.nm)+'</span><span class="v">'+gs(c.real)+(c.meta>0?' / '+gs(c.meta):' · sin meta')+'</span></div>'+
+          '<div class="btrack"><div class="bfill'+(over||!(c.meta>0)?' over':'')+'" style="width:'+(c.real/tope*100)+'%"></div>'+
+          (c.meta>0?'<div class="bmark" style="left:'+(c.meta/tope*100)+'%"></div>':'')+'</div></div>';
+      }).join('')+'</div>';
+    }
+    if(r.obs.length){
+      h+='<div class="inf-sec">Observaciones</div><div class="inf-obs">'+r.obs.map(function(o){
+        return '<div class="inf-o '+o.cls+'"><b>'+esc(o.t)+'</b><span>'+esc(o.x)+'</span></div>'; }).join('')+'</div>';
+    }
+    if(r.rec.length){
+      h+='<div class="inf-sec">Recomendaciones, en orden de impacto</div><ol class="inf-rec">'+r.rec.map(function(x){
+        return '<li><div class="inf-rt"><b>'+esc(x.t)+'</b><span class="inf-tag">'+esc(x.tag)+'</span></div><p>'+x.x+'</p>'+
+          (x.aporte!==undefined && x.aporte!==st.aporte?'<button class="ghost inf-hacer" data-aporte="'+x.aporte+'">Usar '+gs(x.aporte)+' como dinero extra</button>':'')+'</li>'; }).join('')+'</ol>';
+    }
+    if(!r.tieneMetas) h+='<p class="inf-nota">Este mes se cerró con una versión anterior de la app: el informe tiene menos detalle.</p>';
+    h+='<p class="inf-nota">Análisis automático de tus propios números. No reemplaza a un asesor financiero profesional.</p>';
+    return h;
+  }
+
+  function renderInformeAviso(){
+    var host=el('informeAviso'), u=(st.hist||[])[0];
+    if(host===_noop) return;
+    if(!u || st.informeVisto!==false){ host.hidden=true; return; }
+    var r=informeMes(u, (st.hist||[])[1]);
+    host.hidden=false;
+    host.className='card inf-aviso '+r.veredicto.cls;
+    host.innerHTML='<div><b>Tu informe de '+esc(u.etiqueta.split(' ')[0])+' está listo</b><span>'+esc(r.veredicto.t)+'. '+r.rec.length+(r.rec.length===1?' recomendación':' recomendaciones')+' para este mes.</span></div>'+
+      '<div class="inf-aviso-act"><button id="infVer">Ver informe</button><button class="ghost" id="infCerrar">Ocultar</button></div>';
+    el('infVer').addEventListener('click', function(){
+      st.informeVisto=true; guardar(); renderInformeAviso();
+      document.querySelector('.tab[data-p=hist]').click();
+      setTimeout(function(){ var d=document.querySelector('#histList details.inf'); if(d){ d.open=true; d.scrollIntoView({behavior:'smooth', block:'start'}); } }, 80);
+    });
+    el('infCerrar').addEventListener('click', function(){ st.informeVisto=true; renderInformeAviso(); guardar(); });
   }
 
   // ============ ANIMACIONES ============
@@ -1553,6 +1723,13 @@
   //                firma (si cambia, el consejo vuelve a aparecer aunque lo hayas ocultado), accion?}
   var ASESOR_VER_TODOS = false;
 
+  function fechaMov(v){
+    var p=String(v.f||'').split('/'); if(p.length<2) return null;
+    var h=new Date(), d=new Date(h.getFullYear(), (+p[1])-1, +p[0]);
+    if(isNaN(d)) return null;
+    if(d>h) d.setFullYear(d.getFullYear()-1);
+    return d;
+  }
   function cicloActual(){
     var ini = (st.ciclo && st.ciclo.inicio) || new Date().toISOString().slice(0,10);
     var fin = sumaMeses(ini, 1);
@@ -1703,6 +1880,29 @@
       var proyMes=gastoHoy/Math.max(c.frac,0.2);
       if(proyMes>ult.gastos*1.2) out.push({id:'vsmes', nivel:2, peso:proyMes-ult.gastos, firma:redondear(proyMes-ult.gastos,100000),
         titulo:'Vas gastando más que el mes pasado', texto:'A este ritmo cerrás el ciclo en ~<b>'+gs(redondear(proyMes))+'</b>, contra '+gs(ult.gastos)+' en '+ult.etiqueta+' (+'+Math.round((proyMes/ult.gastos-1)*100)+'%).'});
+    }
+
+    // 12) tope semanal en gastos variables (la meta del mes repartida por semana)
+    var lunes=new Date(); lunes.setHours(0,0,0,0); lunes.setDate(lunes.getDate()-((lunes.getDay()+6)%7));
+    var semCat={}, frec=((st.hist||[])[0]||{}).cuentaCat; // solo donde gastás seguido (si se sabe)
+    (st.movs||[]).filter(esGasto).forEach(function(v){ var fm=fechaMov(v); if(fm && fm>=lunes) semCat[v.cat]=(semCat[v.cat]||0)+v.monto; });
+    todosItems().forEach(function(cat){
+      var gr=grupoDeItem(cat.id); if(!gr || gr.id!=='var' || !(cat.meta>=100000) || (frec && (frec[cat.id]||0)<6)) return;
+      var u=semCat[cat.id]||0, tope=redondear(cat.meta/4.3, 10000);
+      if(u>tope && !((g[cat.id]||0)>cat.meta)) out.push({id:'semana-'+cat.id, nivel:2, peso:u-tope, firma:lunes.toISOString().slice(0,10)+'-'+redondear(u,50000),
+        titulo:cat.nm+': pasaste el tope de la semana', texto:'Esta semana llevás <b>'+gs(u)+'</b> y el tope semanal es '+gs(tope)+' (tu meta del mes repartida en semanas). Lo que sigas gastando acá hasta el lunes se lo quita al resto del mes.'});
+    });
+
+    // 13) pagos a tarjetas que se los come el consumo nuevo
+    var ini=st.ciclo && st.ciclo.deudasInicio;
+    if(ini && c.pasados>=7){
+      tarjetas().forEach(function(m){
+        var pagado=(st.movs||[]).reduce(function(a,v){ return a+((v.tipo==='deuda' && v.cat===m.id)?v.monto:0); },0);
+        if(pagado<200000 || ini[m.id]===undefined) return;
+        var bajo=ini[m.id]-saldoDe(m);
+        if(bajo<pagado*0.5) out.push({id:'efic-'+m.id, nivel:2, peso:pagado-bajo, firma:redondear(pagado-bajo,100000),
+          titulo:m.nm+': pagás pero no baja', texto:'Este ciclo le pagaste <b>'+gs(pagado)+'</b> y el saldo bajó '+(bajo>0?'solo '+gs(bajo):'nada')+'. Revisá si seguís comprando con esa tarjeta y actualizá el saldo con lo que dice el banco.'});
+      });
     }
 
     // si no hay nada urgente, decirlo
@@ -1897,6 +2097,7 @@
     renderDeudas();
     renderEditorDeudas();
     renderHist();
+    renderInformeAviso();
     renderEvolucion();
 
     var sobra = ingreso() - cuotasFijas() - st.aporte - totalMetas();
@@ -2400,6 +2601,13 @@
     var pagosDeuda = (st.movs||[]).filter(function(v){return v.tipo==='deuda';}).reduce(function(a,v){return a+v.monto;},0);
     var ahorro = (st.movs||[]).filter(function(v){return v.tipo==='ahorro';}).reduce(function(a,v){return a+v.monto;},0);
     var deudaTot = deudaTotal();
+    var metas={}, nombres={}, grupoCat={}, cuentaCat={}, pagosPorDeuda={}, deudasCierre={}, tipoDeuda={};
+    st.grupos.forEach(function(gr){ gr.items.forEach(function(i){ metas[i.id]=i.meta||0; nombres[i.id]=i.nm; grupoCat[i.id]=gr.id; }); });
+    (st.movs||[]).forEach(function(v){
+      if(esGasto(v)) cuentaCat[v.cat]=(cuentaCat[v.cat]||0)+1;
+      else if(v.tipo==='deuda') pagosPorDeuda[v.cat]=(pagosPorDeuda[v.cat]||0)+v.monto;
+    });
+    DEUDAS_META.forEach(function(m){ deudasCierre[m.id]=saldoDe(m); tipoDeuda[m.id]=m.tipo; });
     // deuda al INICIO del mes = deuda al cerrar del mes anterior (último registro del historial)
     var deudaInicial = (st.hist && st.hist.length) ? (st.hist[0].deudaTotal||null) : null;
     var hoy=new Date();
@@ -2420,7 +2628,11 @@
       gastos:gastos, pagosDeuda:pagosDeuda, ahorro:ahorro,
       saldoFinal:st.saldo, deudaInicial:deudaInicial, deudaTotal:deudaTot,
       porCat:(function(){ var g=gastadoPorCat(), o={}; Object.keys(g).forEach(function(k){ if(g[k]>0) o[k]=g[k]; }); return o; })(),
-      movimientos:(st.movs||[]).length
+      movimientos:(st.movs||[]).length,
+      // detalle para el informe del mes
+      metas:metas, nombres:nombres, grupoCat:grupoCat, cuentaCat:cuentaCat,
+      pagosPorDeuda:pagosPorDeuda, deudasCierre:deudasCierre, deudasInicio:(st.ciclo && st.ciclo.deudasInicio) || null,
+      aporte:st.aporte, cuotas:cuotasFijas(), tipoDeuda:tipoDeuda
     });
     if(st.hist.length>60) st.hist=st.hist.slice(0,60);
   }
@@ -2450,8 +2662,10 @@
       }
     });
     st.todos=nuevos;
-    st.ciclo={inicio:f, cobros:[f]};
+    st.ciclo={inicio:f, cobros:[f], deudasInicio:fotoDeudas()};
+    st.informeVisto=false; // hay informe nuevo para avisar en Hoy
   }
+  function fotoDeudas(){ var o={}; DEUDAS_META.forEach(function(m){ o[m.id]=saldoDe(m); }); return o; }
   function registrarCobro(){
     var monto=pn(el('cMonto').value);
     var f=el('cFecha').value || new Date().toISOString().slice(0,10);
