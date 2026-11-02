@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=10">
+<link rel="stylesheet" href="styles.css?v=11">
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -25,6 +25,7 @@
       <div class="kpi"><div class="k">Saldo en cuenta</div><div class="v" id="kSaldo">—</div></div>
       <div class="kpi"><div class="k">Gastar hoy</div><div class="v ok" id="kHoy">—</div></div>
       <div class="kpi"><div class="k">Deuda cero</div><div class="v" id="kZero">—</div></div>
+      <div class="kpi kpi-side"><div class="k">Deuda total</div><div class="v" id="kDeuda">—</div></div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Secciones">
       <button class="tab" role="tab" aria-selected="true" data-p="hoy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg><span>Hoy</span></button>
@@ -228,6 +229,8 @@
 
   <!-- ============ DEUDAS ============ -->
   <div class="panel cols" id="p-deudas" hidden>
+    <div class="card dtot" id="deudaTotal"></div>
+
     <div class="col">
     <h2>Tus deudas</h2>
     <p class="sub-t">Método avalancha: pagás el mínimo de todas y el dinero extra va entero a la más cara, hasta reventarla. Después salta sola a la siguiente.</p>
@@ -302,4 +305,4 @@
   </footer>
 </div>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>

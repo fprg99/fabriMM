@@ -636,3 +636,33 @@
     .panel.entra .ev-linea{stroke-dasharray:1;animation:trazar 1.2s cubic-bezier(.2,.8,.2,1) .2s both}
     .panel.entra .ev-area,.panel.entra .ev-pto,.panel.entra .ev-val{animation:aparecer .5s ease .9s both}
   }
+
+  /* ---------- deuda total a la fecha (pestaña Deudas) ---------- */
+  .dtot{padding:18px 18px 16px;margin-top:18px;border:none;box-shadow:var(--shadow-2)}
+  .dtot-grid{display:grid;grid-template-columns:1fr;gap:10px}
+  .dtot-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-family:var(--display);font-size:14.5px;font-weight:600;
+             padding-bottom:7px;margin-bottom:4px;border-bottom:1px solid var(--rule)}
+  .dtot-head .num{font-family:var(--data);font-size:17px;letter-spacing:-.02em}
+  .dtot-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;padding:4px 0}
+  .dtot-row .num{font-family:var(--data);font-weight:600;white-space:nowrap}
+  .dtot-nm{min-width:0}
+  .dtot-det{font-family:var(--data);font-size:10.5px;color:var(--ink-soft);margin-top:1px}
+  .dtot-nota{font-size:11px;color:var(--ink-soft);line-height:1.4;margin-top:6px}
+  .dtot-tot{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)}
+  .dtot-tot > span:first-child{font-family:var(--display);font-size:17px;font-weight:600}
+  .dtot-v{font-family:var(--data);font-size:28px;font-weight:600;letter-spacing:-.03em;color:var(--deep)}
+  .dtot-baja{font-size:12px;color:var(--ink-soft);margin-top:4px;text-align:right}
+  .dtot-baja.ok{color:var(--moss)} .dtot-baja.bad{color:var(--brick)}
+  .kpi-side{display:none}
+  @media (min-width:700px){ .dtot-grid{grid-template-columns:1fr 1fr} }
+  @media (min-width:1024px){
+    .panel.cols > .dtot{grid-column:1 / -1;margin-top:28px}
+    .kpi-side{display:block}
+  }
+  /* compu con pantalla baja: achicar los números del menú para que entren los cuatro */
+  @media (min-width:1024px) and (max-height:760px){
+    .top{overflow-y:auto}
+    .strip{gap:6px}
+    .kpi{padding:8px 12px}
+    .kpi .v{font-size:18px}
+  }

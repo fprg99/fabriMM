@@ -980,12 +980,63 @@
     });
   }
 
+  // ---- DEUDA TOTAL a la fecha: préstamos (cuotas que faltan × cuota) + tarjetas ----
+  function renderDeudaTotal(){
+    var host=el('deudaTotal'); if(!host) return;
+    var prest=prestamos(), tarj=DEUDAS_META.filter(function(m){ return !esPrestamo(m); });
+    function suma(l){ return l.reduce(function(s,m){ return s+saldoDe(m); },0); }
+    var totP=suma(prest), totT=suma(tarj), tot=deudaTotal();
+
+    function filas(l){
+      if(!l.length) return '<div class="dtot-row"><span class="dtot-nm">No tenés cargada ninguna</span></div>';
+      return l.map(function(m){
+        var det = esPrestamo(m) ? '<div class="dtot-det">'+gs(st.deudas[m.id]||0)+' cuotas × '+gs(m.cuota||0)+'</div>' : '';
+        return '<div class="dtot-row"><div class="dtot-nm">'+m.nm+det+'</div><span class="num">'+gs(saldoDe(m))+'</span></div>';
+      }).join('');
+    }
+
+    // cuánto cambió desde el último cierre de mes
+    var baja='';
+    var ult=(st.hist||[])[0];
+    if(ult && ult.deudaTotal!==undefined){
+      var dif=ult.deudaTotal-tot, cuando=' desde el cierre de '+ult.etiqueta;
+      baja = dif>0 ? '<div class="dtot-baja ok">Bajó '+gs(dif)+cuando+'</div>'
+           : dif<0 ? '<div class="dtot-baja bad">Subió '+gs(-dif)+cuando+'</div>'
+           : '<div class="dtot-baja">Igual que al cierre de '+ult.etiqueta+'</div>';
+    }
+
+    host.innerHTML=
+      '<div class="foco-tag">Deuda total a la fecha</div>'+
+      '<div class="dtot-grid">'+
+        '<div class="foco-box">'+
+          '<div class="dtot-head"><span>Préstamos</span><b class="num" id="dtPrest">'+gs(totP)+'</b></div>'+
+          filas(prest)+
+          '<div class="dtot-nota">Lo que te queda por pagar en cuotas, con intereses incluidos.</div>'+
+        '</div>'+
+        '<div class="foco-box">'+
+          '<div class="dtot-head"><span>Tarjetas</span><b class="num" id="dtTarj">'+gs(totT)+'</b></div>'+
+          filas(tarj)+
+        '</div>'+
+      '</div>'+
+      '<div class="dtot-tot"><span>Total</span><span class="dtot-v num" id="dtTotal">'+gs(tot)+'</span></div>'+
+      baja;
+
+    // el bloque se rearma entero, así que la animación arranca desde el valor anterior guardado acá
+    var prev=host._prev||{};
+    if(prev.p!==undefined){ tweenNum(el('dtPrest'), prev.p, totP, 650); tweenNum(el('dtTarj'), prev.t, totT, 650); tweenNum(el('dtTotal'), prev.tot, tot, 650); }
+    host._prev={p:totP, t:totT, tot:tot};
+
+    el('kDeuda').textContent=gs(tot);
+    numVivo(el('kDeuda'), Math.round(tot));
+  }
+
   function renderDeudas(){
     el('aporte').value=st.aporte;
     el('aporteVal').textContent='Gs. '+gs(st.aporte);
     el('puenteChk').checked=st.puente;
 
     var sim=simular();
+    renderDeudaTotal();
     renderSaldosDeuda(sim);
     el('kZero').textContent = sim.meses>=60 ? '+5 años' : nombreMes(sim.meses-1,false)+' '+String(ANIO0+Math.floor((MES0+sim.meses-1)/12)).slice(2);
 
@@ -1434,7 +1485,7 @@
     if(prev!==undefined && prev!==valor) tweenNum(e, prev, valor, 650);
   }
 
-  var SEL_NUMS = '.today .big, #kSaldo, #kHoy, .foco-saldo, .big-inline, .gb-v, .hist-v, .slider-val, '+
+  var SEL_NUMS = '.today .big, #kSaldo, #kHoy, #kDeuda, .dtot .num, .foco-saldo, .big-inline, .gb-v, .hist-v, .slider-val, '+
                  '.chart-svg text.t1, #todoSum, #ingTot, .obj-top .v b, .foco-v';
   var SEL_BARRAS = '.bar > div, .obj-bar > div, .gb-bar > div, .drow-progress > div, .bfill, .meter > div';
 
